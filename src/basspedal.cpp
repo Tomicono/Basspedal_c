@@ -22,11 +22,9 @@
 #include <Bounce.h>
 
 MIDI_CREATE_DEFAULT_INSTANCE();
-
 #define Addr_LCD 0x27
-
-
 LiquidCrystal_I2C lcd(Addr_LCD, 20, 4);
+
 
 #define encoder0PinA 5     // encoder 0 pin a
 #define encoder0PinB 6     // encoder 0 pin b
@@ -43,6 +41,20 @@ LiquidCrystal_I2C lcd(Addr_LCD, 20, 4);
 
 #define PRESSED 0x0         // button pressed --> Input low
 #define RELEASED 0x1        // button not pressed --> Input open = high
+
+// Functions
+void readEeprom();
+void saveEeprom();
+void Panic();
+void showMenu();
+void readkeys();
+void sendMIDI();
+void sethold();
+void setoctave();
+void recBankA();
+void setEncoder0Button();
+void getEncoder0();
+void whichbank(int i, int j, int k);
 
 
 char mapping0[] = { 'L', 'R' };  // This is a rotary encoder so it returns L for down/left and R for up/right on the dial.
@@ -153,8 +165,8 @@ byte barpic5[8] = {
 };
 //--- Menu
 volatile int menulevel = 0;  //set menu to home
-char boottext0[] = "  Fuss auf Midi     ";
-char boottext1[] = "    Debug hold      ";
+char boottext0[] = "  Bass Pedal        ";
+char boottext1[] = "   VS Code          ";
 char clearline[] = "                    ";
 char menutext0[] = "Recall";
 char menutext1[] = "Octave";
@@ -174,10 +186,11 @@ int l = 0;
 
 void setup()
 {
-  Wire.begin();                                        // setup the I2C bus
-  MIDI.begin(MIDI_CHANNEL_OMNI);                       //initialise midi library
-  MIDI.setThruFilterMode(midi::MidiFilterMode::Full);  // Full (every incoming message is sent back)
+  Wire.begin();                                   // setup the I2C bus
+  MIDI.begin(MIDI_CHANNEL_OMNI);                  //initialise midi library
+  MIDI.setThruFilterMode(midi::Thru::Full);       // Full (every incoming message is sent back)
   MIDI.turnThruOn();
+  
   //--- LCD initializing
   lcd.init();
   lcd.backlight();
