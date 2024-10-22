@@ -165,8 +165,8 @@ byte barpic5[8] = {
 };
 //--- Menu
 volatile int menulevel = 0;  //set menu to home
-char boottext0[] = "  Bass Pedal        ";
-char boottext1[] = "   VS Code          ";
+char boottext0[] = "   Bass Pedal       ";
+char boottext1[] = "   version tag      ";
 char clearline[] = "                    ";
 char menutext0[] = "Recall";
 char menutext1[] = "Octave";
@@ -181,11 +181,10 @@ char valuetext0[] = "PRESET ";
 char valuetext0_1[] = "recalled   ";
 char valuetext2[] = "Note ";
 char valuetext7_1[] = "saved      ";
-int k = 0;
-int l = 0;
 
 void setup()
 {
+  #pragma message(GIT_REV)
   Wire.begin();                                   // setup the I2C bus
   MIDI.begin(MIDI_CHANNEL_OMNI);                  //initialise midi library
   MIDI.setThruFilterMode(midi::Thru::Full);       // Full (every incoming message is sent back)
@@ -233,7 +232,7 @@ void setup()
   lcd.setCursor(0, 1);
   lcd.print(boottext0);
   lcd.setCursor(0, 2);
-  lcd.print(boottext1);
+  lcd.print(GIT_REV);
   delay(5000);
   lcd.clear();
   showMenu();
@@ -260,10 +259,12 @@ void loop()
     menutimeout = millis();
   }
 }
-//----------------------------------------
-// Values up to 999 
-// align: 0=right, 1=left
 
+//-----------------------------------------------
+/// @brief Print values up to 999 
+/// @param value value to print
+/// @param digits number of digits to print range 1-3
+/// @param align 0=right, 1=left
 void printValue(int value, int digits, int align) { 
   switch(digits) {
     case 1:
