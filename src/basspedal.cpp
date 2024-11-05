@@ -53,8 +53,8 @@ void sethold();
 void setoctave();
 void recBankA();
 void setEncoder0Button();
-void getEncoder0();
-void whichbank(int i, int j, int k);
+void handleRotaryKnob();
+void printPresetName(int i, int j, int k);
 
 
 char mapping0[] = { 'L', 'R' };  // This is a rotary encoder so it returns L for down/left and R for up/right on the dial.
@@ -75,7 +75,11 @@ volatile int encoder2PosMod = 0;                            //encoder modulation
 
 volatile boolean holdflag = false;                             //hold function
 volatile boolean octflag = false;                              //octave switcher
-volatile boolean pb0flag = false;                              //pushbutton encoder menu/value switcher
+
+/// @brief user interface: toggled by pushing the rotary encoder 
+/// to enter or leave submenu. Value true indicates submenu is active
+volatile boolean bUserIsEditing = false;
+
 volatile int bankflag = 0;                                     //recall preset bank a-c
 volatile boolean bouncer[4] = { false, false, false, false };  //toggle functions  0:hold 1:octaveswitch 2: Pushbutton encoder 3: recall preset bank a
 
@@ -92,7 +96,7 @@ int modulation = 0;  //set volume
 int channel = 1;     //set midi channel
 int prgchange = -1;  //
 int notehold = 129;  //flag for hold function
-int recallP = 0;     //recall preset number
+int iCurrProgram = 0;     //recall preset number
 int rP = 0;
 int saveP = 0;       //save preset number
 unsigned long menutimeout = 0;  // skip to menulevel 0 after the specified time, when the encoder was turned
@@ -177,10 +181,10 @@ char menutext5[] = "Program Change";
 char menutext6[] = "MIDI Channel";
 char menutext7[] = "Save";
 
-char valuetext0[] = "PRESET ";
-char valuetext0_1[] = "recalled   ";
-char valuetext2[] = "Note ";
-char valuetext7_1[] = "saved      ";
+char displayText_PRESET[] = "PRESET ";
+char displayText_RECALLED[] = "recalled   ";
+char displayText_NOTE[] = "Note ";
+char displayText_SAVED[] = "saved      ";
 
 void setup()
 {
@@ -247,14 +251,14 @@ void loop()
   setoctave();
   recBankA();
   setEncoder0Button();
-  getEncoder0();
+  handleRotaryKnob();
 
   // skip back to mainmenu
   if (millis() == menutimeout + 30000)  // 30 Seconds
   { 
     menulevel = 0;
     encoder0PosM = 0;
-    pb0flag = false;
+    bUserIsEditing = false;
     showMenu();
     menutimeout = millis();
   }
@@ -336,12 +340,14 @@ void barGraph(int column, int row, int length, int mvalue, int value) {
     lcd.print(" ");
   }
 }
-//----------------------------------------
-void getEncoder0() {
+
+/// @brief process user turning of the rotary encoder throughout
+/// the menus and update LCD accordingly
+void handleRotaryKnob() {
   char temp;
   temp = my_encoder0.getKey();
   //temp = dial0 -> getKey(); // Use the phi_interfaces to access the same keypad
-  if (pb0flag == false) {
+  if (bUserIsEditing == false) {
     if (temp == 'R') {
       menutimeout = millis();
       if (encoder0PosM < 7) {
@@ -368,8 +374,8 @@ void getEncoder0() {
           encoder0Pos[0]++;
           rP = encoder0Pos[0];
           lcd.setCursor(1, 1);
-          lcd.print(valuetext0);  // "Preset "
-          whichbank(8, 1, rP);
+          lcd.print(displayText_PRESET);  // "Preset "
+          printPresetName(8, 1, rP);
         }
       }
       if (temp == 'L') {
@@ -378,8 +384,8 @@ void getEncoder0() {
           encoder0Pos[0]--;
           rP = encoder0Pos[0];
           lcd.setCursor(1, 1);
-          lcd.print(valuetext0);  // "Preset "
-          whichbank(8, 1, rP);
+          lcd.print(displayText_PRESET);  // "Preset "
+          printPresetName(8, 1, rP);
         }
       }
     }
@@ -416,7 +422,7 @@ void getEncoder0() {
           encoder0Pos[2]++;
           transpose = encoder0Pos[2];
           lcd.setCursor(1, 1);
-          lcd.print(valuetext2);  // "Note "
+          lcd.print(displayText_NOTE);  // "Note "
           if (transpose > 0) lcd.print("+");
           lcd.print(transpose);
           if (transpose <= 9 && transpose >= -9) lcd.print(" ");
@@ -428,7 +434,7 @@ void getEncoder0() {
           encoder0Pos[2]--;
           transpose = encoder0Pos[2];
           lcd.setCursor(1, 1);
-          lcd.print(valuetext2);  // "Note "
+          lcd.print(displayText_NOTE);  // "Note "
           if (transpose > 0) lcd.print("+");
           lcd.print(transpose);
           if (transpose <= 9 && transpose >= -9) lcd.print(" ");
@@ -541,8 +547,8 @@ void getEncoder0() {
           encoder0Pos[7]++;
           saveP = encoder0Pos[7];
           lcd.setCursor(1, 1);
-          lcd.print(valuetext0);  // "Preset "
-          whichbank(8, 1, saveP);
+          lcd.print(displayText_PRESET);  // "Preset "
+          printPresetName(8, 1, saveP);
         }
       }
       if (temp == 'L') {
@@ -551,17 +557,18 @@ void getEncoder0() {
           encoder0Pos[7]--;
           saveP = encoder0Pos[7];
           lcd.setCursor(1, 1);
-          lcd.print(valuetext0);  // "Preset "
-          whichbank(8, 1, saveP);
+          lcd.print(displayText_PRESET);  // "Preset "
+          printPresetName(8, 1, saveP);
         }
       }
     }
   }
 }
 
-//------------------------------------------
-void printCursor() {
-  if (pb0flag == false) {
+/// @brief user interface: set symbol ">" at the active line
+/// used to mark the line where editing is done
+void printActiveLineMarker() {
+  if (bUserIsEditing == false) {
     lcd.setCursor(0, 1);
     lcd.print(" ");
 
@@ -584,7 +591,7 @@ void showMenu() {
       lcd.print(clearline);
       lcd.setCursor(0, 1);
       lcd.print(clearline);
-      printCursor();
+      printActiveLineMarker();
       lcd.setCursor(1, 0);
       lcd.print(menutext0);
       // text octave
@@ -606,9 +613,9 @@ void showMenu() {
       }
       // text 2. line
       lcd.setCursor(1, 1);
-      lcd.print(valuetext0);
-      if (pb0flag == true) whichbank(8, 1, rP);
-      else whichbank(8, 1, recallP);
+      lcd.print(displayText_PRESET);
+      if (bUserIsEditing == true) printPresetName(8, 1, rP);
+      else printPresetName(8, 1, iCurrProgram);
       // presetbank
       if (bankflag > 0) {
         lcd.setCursor(18, 0);
@@ -652,7 +659,7 @@ void showMenu() {
       lcd.print(clearline);
       lcd.setCursor(0, 1);
       lcd.print(clearline);
-      printCursor();
+      printActiveLineMarker();
       lcd.setCursor(1, 0);
       lcd.print(menutext1);
       lcd.setCursor(1, 1);
@@ -664,11 +671,11 @@ void showMenu() {
       lcd.print(clearline);
       lcd.setCursor(0, 1);
       lcd.print(clearline);
-      printCursor();
+      printActiveLineMarker();
       lcd.setCursor(1, 0);
       lcd.print(menutext2);
       lcd.setCursor(1, 1);
-      lcd.print(valuetext2);
+      lcd.print(displayText_NOTE);
       if (transpose > 0) {
         lcd.setCursor(6, 1);
         lcd.print("+");
@@ -685,7 +692,7 @@ void showMenu() {
       lcd.print(clearline);
       lcd.setCursor(0, 1);
       lcd.print(clearline);
-      printCursor();
+      printActiveLineMarker();
       lcd.setCursor(1, 0);
       lcd.print(menutext3);
       lcd.setCursor(1, 1);
@@ -696,7 +703,7 @@ void showMenu() {
       lcd.print(clearline);
       lcd.setCursor(0, 1);
       lcd.print(clearline);
-      printCursor();
+      printActiveLineMarker();
       lcd.setCursor(1, 0);
       lcd.print(menutext4);
       lcd.setCursor(1, 1);
@@ -707,7 +714,7 @@ void showMenu() {
       lcd.print(clearline);
       lcd.setCursor(0, 1);
       lcd.print(clearline);
-      printCursor();
+      printActiveLineMarker();
       lcd.setCursor(1, 0);
       lcd.print(menutext5);
       lcd.setCursor(1, 1);
@@ -718,7 +725,7 @@ void showMenu() {
       lcd.print(clearline);
       lcd.setCursor(0, 1);
       lcd.print(clearline);
-      printCursor();
+      printActiveLineMarker();
       lcd.setCursor(1, 0);
       lcd.print(menutext6);
       lcd.setCursor(1, 1);
@@ -729,35 +736,39 @@ void showMenu() {
       lcd.print(clearline);
       lcd.setCursor(0, 1);
       lcd.print(clearline);
-      printCursor();
+      printActiveLineMarker();
       lcd.setCursor(1, 0);
       lcd.print(menutext7);
       lcd.setCursor(1, 1);
-      lcd.print(valuetext0);
-      whichbank(8, 1, rP);  // Save Preset springt auf den Speicherplatz vom aktivem Recall Preset
+      lcd.print(displayText_PRESET);
+      printPresetName(8, 1, rP);  // Save Preset springt auf den Speicherplatz vom aktivem Recall Preset
       saveP = rP;           // Recall Preset an Save Preset übergeben
       break;
   }
 }
-//----------------------------------------
-void whichbank(int i, int j, int k) {  // i: cursor pos j: line k: presetnumber
-  if (k >= 0 && k < 13) {
-    lcd.setCursor(i, j);
+
+/// @brief Print preset name at given screen position
+/// @param iPosX first char 
+/// @param iPosY line 
+/// @param iPreset index of preset, splitted in A0-A12 B0-12, C0-C12
+void printPresetName(int iPosX, int iPosY, int iPreset) {  
+  if (iPreset >= 0 && iPreset < 13) {
+    lcd.setCursor(iPosX, iPosY);
     lcd.print("A");
-    lcd.print(k);
-    if (k <= 9) lcd.print(" ");
+    lcd.print(iPreset);
+    if (iPreset <= 9) lcd.print(" ");
   }
-  if (k > 12 && k < 26) {
-    lcd.setCursor(i, j);
+  if (iPreset > 12 && iPreset < 26) {
+    lcd.setCursor(iPosX, iPosY);
     lcd.print("B");
-    lcd.print(k - 13);
-    if (k - 13 <= 9) lcd.print(" ");
+    lcd.print(iPreset - 13);
+    if (iPreset - 13 <= 9) lcd.print(" ");
   }
-  if (k > 25 && k < 39) {
-    lcd.setCursor(i, j);
+  if (iPreset > 25 && iPreset < 39) {
+    lcd.setCursor(iPosX, iPosY);
     lcd.print("C");
-    lcd.print(k - 26);
-    if (k - 26 <= 9) lcd.print(" ");
+    lcd.print(iPreset - 26);
+    if (iPreset - 26 <= 9) lcd.print(" ");
   }
 }
 //-------------------------------------
@@ -865,25 +876,25 @@ void setEncoder0Button() {
     if (!pah) {
       if (menulevel == 0) {
         lcd.setCursor(0, 0);
-        lcd.print(valuetext0);  // "Preset "
-        recallP = rP;
+        lcd.print(displayText_PRESET);  // "Preset "
+        iCurrProgram = rP;
         readEeprom();
-        whichbank(7, 0, recallP);
+        printPresetName(7, 0, iCurrProgram);
         Panic();
         lcd.setCursor(0, 1);
-        lcd.print(valuetext0_1);
-        pb0flag = false;
+        lcd.print(displayText_RECALLED);
+        bUserIsEditing = false;
         delay(2000);
         showMenu();
       }
       if (menulevel == 7) {
         lcd.setCursor(0, 0);
-        lcd.print(valuetext0);  // "Preset "
+        lcd.print(displayText_PRESET);  // "Preset "
         saveEeprom();
-        whichbank(7, 0, saveP);
+        printPresetName(7, 0, saveP);
         lcd.setCursor(0, 1);
-        lcd.print(valuetext7_1);
-        pb0flag = false;
+        lcd.print(displayText_SAVED);
+        bUserIsEditing = false;
         delay(2000);
         menulevel = 0;  // jump back to play menu
         encoder0PosM = menulevel;
@@ -892,11 +903,11 @@ void setEncoder0Button() {
     }
   } else {
     if (digitalRead(in_ButtonEncoder) == PRESSED) {
-      if (pb0flag == false && bouncer[2] == true) {
-        pb0flag = true;
+      if (bUserIsEditing == false && bouncer[2] == true) {
+        bUserIsEditing = true;
         bouncer[2] = false;
-        rP = recallP;
-        printCursor();
+        rP = iCurrProgram;
+        printActiveLineMarker();
         digitalWrite(ledPresetGn, LOW);
         digitalWrite(ledPresetRt, LOW);
         bankflag = 0;
@@ -907,8 +918,8 @@ void setEncoder0Button() {
         lcd.setCursor(18, 0);
         lcd.print(" ");
       }
-      if (pb0flag == true && bouncer[2] == true) {
-        pb0flag = false;
+      if (bUserIsEditing == true && bouncer[2] == true) {
+        bUserIsEditing = false;
         bouncer[2] = false;
         showMenu();
       }
@@ -972,10 +983,10 @@ void sendMIDI() {
     if (keyispressed[i] == PRESSED) 
     {          //the key on the board is pressed
       if (bankflag > 0) {
-        if (bankflag == 1) recallP = i;
-        if (bankflag == 2) recallP = i + 13;
-        if (bankflag == 3) recallP = i + 26;
-        rP = recallP;
+        if (bankflag == 1) iCurrProgram = i;
+        if (bankflag == 2) iCurrProgram = i + 13;
+        if (bankflag == 3) iCurrProgram = i + 26;
+        rP = iCurrProgram;
         readEeprom();
         showMenu();
         lcd.setCursor(18, 0);
@@ -1056,31 +1067,31 @@ void saveEeprom() {
 void readEeprom() {
   int prg, trans;
 
-  if (EEPROM.read(recallP * 6) < 10 && EEPROM.read(recallP * 6) >= 0) {
-    octave = EEPROM.read(recallP * 6);
+  if (EEPROM.read(iCurrProgram * 6) < 10 && EEPROM.read(iCurrProgram * 6) >= 0) {
+    octave = EEPROM.read(iCurrProgram * 6);
   }
-  if (EEPROM.read(recallP * 6 + 1) < 30 && EEPROM.read(recallP * 6 + 1) >= 0) {
-    trans = EEPROM.read(recallP * 6 + 1);
+  if (EEPROM.read(iCurrProgram * 6 + 1) < 30 && EEPROM.read(iCurrProgram * 6 + 1) >= 0) {
+    trans = EEPROM.read(iCurrProgram * 6 + 1);
     if (trans >= 0 && trans < 13) transpose = trans;
     else transpose = trans - 30;  // Shift the positive value back to a negative
   }
-  if (EEPROM.read(recallP * 6 + 2) < 128 && EEPROM.read(recallP * 6 + 2) >= 0) {
-    velocity = EEPROM.read(recallP * 6 + 2);
+  if (EEPROM.read(iCurrProgram * 6 + 2) < 128 && EEPROM.read(iCurrProgram * 6 + 2) >= 0) {
+    velocity = EEPROM.read(iCurrProgram * 6 + 2);
   }
-  if (EEPROM.read(recallP * 6 + 3) < 128 && EEPROM.read(recallP * 6 + 3) >= 0) {
-    volume = EEPROM.read(recallP * 6 + 3);
+  if (EEPROM.read(iCurrProgram * 6 + 3) < 128 && EEPROM.read(iCurrProgram * 6 + 3) >= 0) {
+    volume = EEPROM.read(iCurrProgram * 6 + 3);
     MIDI.send(midi::MidiType::ControlChange, 7, volume, channel);
   }
-  if (EEPROM.read(recallP * 6 + 4) < 129 && EEPROM.read(recallP * 6 + 4) >= 0) {
-    prg = EEPROM.read(recallP * 6 + 4);
+  if (EEPROM.read(iCurrProgram * 6 + 4) < 129 && EEPROM.read(iCurrProgram * 6 + 4) >= 0) {
+    prg = EEPROM.read(iCurrProgram * 6 + 4);
     if (prg == 128) prgchange = -1;
     else {
       prgchange = prg;
       MIDI.sendProgramChange(prgchange, channel);
     }
   }
-  if (EEPROM.read(recallP * 6 + 5) < 17 && EEPROM.read(recallP * 6 + 5) > 0) {
-    channel = EEPROM.read(recallP * 6 + 5);
+  if (EEPROM.read(iCurrProgram * 6 + 5) < 17 && EEPROM.read(iCurrProgram * 6 + 5) > 0) {
+    channel = EEPROM.read(iCurrProgram * 6 + 5);
   }
   modulation = 0;
 }
