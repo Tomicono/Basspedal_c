@@ -976,16 +976,18 @@ void recBankA() {
 }
 //-------------------------------------
 // Send MIDI instructions via MIDI out
+// makes no sense to use 
 ///-----------------------------
 void sendMIDI() {  
-  int note;                                //holder for the value of note being played
-  for (unsigned int i = 0; i < 13; i++) {  //for each note in the array
-    if (keyispressed[i] == PRESSED) 
+  int note;            // absolute value of played note (0= C0, note 127 = G10)
+  //for each key of the keyboad 
+  for (unsigned int iKeyOfBoard = 0; iKeyOfBoard < 13; iKeyOfBoard++) {  
+    if (keyispressed[iKeyOfBoard] == PRESSED) 
     {          //the key on the board is pressed
       if (bankflag > 0) {
-        if (bankflag == 1) iCurrProgram = i;
-        if (bankflag == 2) iCurrProgram = i + 13;
-        if (bankflag == 3) iCurrProgram = i + 26;
+        if (bankflag == 1) iCurrProgram = iKeyOfBoard;    // BUG: No sense to mix program with note played
+        if (bankflag == 2) iCurrProgram = iKeyOfBoard + 13;
+        if (bankflag == 3) iCurrProgram = iKeyOfBoard + 26;
         rP = iCurrProgram;
         readEeprom();
         showMenu();
@@ -1000,16 +1002,16 @@ void sendMIDI() {
         delay(1000);
         break;
       }
-      if (octflag == true && i < 11) {
-        octave = i;
+      if (octflag == true && iKeyOfBoard < 11) {
+        octave = iKeyOfBoard;
         showMenu();
         digitalWrite(ledOct, LOW);
         octflag = false;
         delay(1000);
         break;
       } else {
-        if (!noteisplaying[i]) {  //if the note is not already playing send MIDI instruction to start the note
-          note = i + (octave * 12) + transpose + 1;
+        if (!noteisplaying[iKeyOfBoard]) {  //if the note is not already playing send MIDI instruction to start the note
+          note = iKeyOfBoard + (octave * 12) + transpose + 1; // why +1?
           if (note < 129 && note > 0) {
             if (holdflag == true && notehold < 129) {  //if hold funcion active note off will send before starting the new note
               MIDI.sendNoteOff(notehold - 1, 0, channel);
@@ -1018,7 +1020,7 @@ void sendMIDI() {
               //Serial.println(notehold-1);
             }
             MIDI.sendNoteOn(note - 1, velocity, channel);  // Send a Note
-            noteisplaying[i] = note;                       // set the note playing flag to TRUE and store the note value
+            noteisplaying[iKeyOfBoard] = note;                       // set the note playing flag to TRUE and store the note value
             notehold = note;                               //buffer the old holded note
             keytime = millis();
             anynoteisplaying = true;
@@ -1033,8 +1035,8 @@ void sendMIDI() {
     } 
     else 
     {                                               // key is released
-      if (noteisplaying[i] && millis() > keytime + 100) {  //if the note is currently playing, turn it off
-        note = noteisplaying[i];                           //retrieve the saved note value incase the octave has changed
+      if (noteisplaying[iKeyOfBoard] && millis() > keytime + 100) {  //if the note is currently playing, turn it off
+        note = noteisplaying[iKeyOfBoard];                           //retrieve the saved note value incase the octave has changed
         if (holdflag == false) {                           //send note off when hold function is inactive
           MIDI.sendNoteOff(note - 1, 0, channel);          // Stop the note
           keytime = millis();
@@ -1044,7 +1046,7 @@ void sendMIDI() {
           //Serial.print("NoteOff ");
           //Serial.println(note-1);
         }
-        noteisplaying[i] = 0;  // clear the note is playing flag
+        noteisplaying[iKeyOfBoard] = 0;  // clear the note is playing flag
       }
     }
   }
