@@ -42,6 +42,8 @@ LiquidCrystal_I2C lcd(Addr_LCD, 20, 4);
 #define PRESSED 0x0         // button pressed --> Input low
 #define RELEASED 0x1        // button not pressed --> Input open = high
 
+const uint8_t noOfKeys = 13;  // number of keys of bass pedal
+
 // Functions
 void readEeprom();
 void saveEeprom();
@@ -83,15 +85,15 @@ volatile boolean bUserIsEditing = false;
 volatile int bankflag = 0;                                     //recall preset bank a-c
 volatile boolean bouncer[4] = { false, false, false, false };  //toggle functions  0:hold 1:octaveswitch 2: Pushbutton encoder 3: recall preset bank a
 
-int keyispressed[16];  //Is the key currently pressed?
+int keyispressed[16];  //Is the key currently pressed
 unsigned long keytime = 0;
-int noteisplaying[16];  //Is the Note currently playing?
+int noteisplaying[noOfKeys];  //Is the Note currently playing?
 boolean anynoteisplaying = false;
 
-int octave = 2;      //set currently played octave
+int octave    = 2;      //set currently played octave
 int transpose = 0;   //transpose notes on the board
-int velocity = 127;  //set note velocity
-int volume = 127;    //set volume
+int velocity  = 127;  //set note velocity
+int volume    = 127;    //set volume
 int modulation = 0;  //set volume
 int channel = 1;     //set midi channel
 int prgchange = -1;  //
@@ -171,21 +173,22 @@ byte barpic5[8] = {
 volatile int menulevel = 0;  //set menu to home
 char boottext0[] = "   Bass Pedal       ";
 char boottext1[] = "   version tag      ";
-char clearline[] = "                    ";
-char menutext0[] = "Recall";
-char menutext1[] = "Octave";
-char menutext2[] = "Transpose";
-char menutext3[] = "Velocity";
-char menutext4[] = "Volume";
-char menutext5[] = "Program Change";
-char menutext6[] = "MIDI Channel";
-char menutext7[] = "Save";
+char blankline[] = "                    ";
+char menutext_RECALL[] = "Recall";
+char menutext_OCTAVE[] = "Octave";
+char menutext_TRANSPOSE[] = "Transpose";
+char menutext_VELOCITY[] = "Velocity";
+char menutext_VOLUME[] = "Volume";
+char menutext_PRGCHNGE[] = "Program Change";
+char menutext_CHANNEL[] = "MIDI Channel";
+char menutext_SAVE[] = "Save";
 
 char displayText_PRESET[] = "PRESET ";
 char displayText_RECALLED[] = "recalled   ";
 char displayText_NOTE[] = "Note ";
 char displayText_SAVED[] = "saved      ";
 
+/// @brief 
 void setup()
 {
   #pragma message(GIT_REV)
@@ -223,15 +226,17 @@ void setup()
 
   readEeprom();  //load saved values
   Panic();
-  lcd.createChar(1, barpic1);  // fonts for bargraph
+  lcd.createChar(1, barpic1);  // char(1) is barpic1
   lcd.createChar(2, barpic2);
   lcd.createChar(3, barpic3);
   lcd.createChar(4, barpic4);
   lcd.createChar(5, barpic5);
-  lcd.createChar(8, notepic);  //font pressed pedal with a note symbol
+  
+  lcd.createChar(8, notepic); ///< char(8) is note symbol (used when key is pressed)
 
   //Serial.begin(9600);  //debugmonitor
   //Serial.println("Ready");
+  
   lcd.clear();
   lcd.setCursor(0, 1);
   lcd.print(boottext0);
@@ -241,7 +246,10 @@ void setup()
   lcd.clear();
   showMenu();
 }
-// --- main loop -----------------------------------------
+
+
+
+/// @brief Arduino Working LOOP
 void loop() 
 {
   readkeys();
@@ -253,7 +261,7 @@ void loop()
   setEncoder0Button();
   handleRotaryKnob();
 
-  // skip back to mainmenu
+  // skip back to mainmenu after 30s
   if (millis() == menutimeout + 30000)  // 30 Seconds
   { 
     menulevel = 0;
@@ -299,8 +307,16 @@ void printValue(int value, int digits, int align) {
       break;
   }
 }
-//----------------------------------------
-void barGraph(int column, int row, int length, int mvalue, int value) {
+
+
+/// @brief Print a bar across a line on the LCD
+/// @param column Start column of bar
+/// @param row line (1-4)
+/// @param length 
+/// @param mvalue 
+/// @param value 
+void barGraph(int column, int row, int length, int mvalue, int value) 
+{
   int b, c;
   float a = ((float)length / mvalue) * value;
   lcd.setCursor(column, row);
@@ -588,12 +604,12 @@ void showMenu() {
   switch (menulevel) {
     case 0:
       lcd.setCursor(0, 0);
-      lcd.print(clearline);
+      lcd.print(blankline);
       lcd.setCursor(0, 1);
-      lcd.print(clearline);
+      lcd.print(blankline);
       printActiveLineMarker();
       lcd.setCursor(1, 0);
-      lcd.print(menutext0);
+      lcd.print(menutext_RECALL);
       // text octave
       lcd.setCursor(12, 1);
       lcd.print("C");
@@ -656,24 +672,24 @@ void showMenu() {
       break;
     case 1:
       lcd.setCursor(0, 0);
-      lcd.print(clearline);
+      lcd.print(blankline);
       lcd.setCursor(0, 1);
-      lcd.print(clearline);
+      lcd.print(blankline);
       printActiveLineMarker();
       lcd.setCursor(1, 0);
-      lcd.print(menutext1);
+      lcd.print(menutext_OCTAVE);
       lcd.setCursor(1, 1);
       lcd.print("C");
       lcd.print(octave - 1);
       break;
     case 2:
       lcd.setCursor(0, 0);
-      lcd.print(clearline);
+      lcd.print(blankline);
       lcd.setCursor(0, 1);
-      lcd.print(clearline);
+      lcd.print(blankline);
       printActiveLineMarker();
       lcd.setCursor(1, 0);
-      lcd.print(menutext2);
+      lcd.print(menutext_TRANSPOSE);
       lcd.setCursor(1, 1);
       lcd.print(displayText_NOTE);
       if (transpose > 0) {
@@ -689,56 +705,56 @@ void showMenu() {
       break;
     case 3:
       lcd.setCursor(0, 0);
-      lcd.print(clearline);
+      lcd.print(blankline);
       lcd.setCursor(0, 1);
-      lcd.print(clearline);
+      lcd.print(blankline);
       printActiveLineMarker();
       lcd.setCursor(1, 0);
-      lcd.print(menutext3);
+      lcd.print(menutext_VELOCITY);
       lcd.setCursor(1, 1);
       printValue(velocity, 3, 1);
       break;
     case 4:
       lcd.setCursor(0, 0);
-      lcd.print(clearline);
+      lcd.print(blankline);
       lcd.setCursor(0, 1);
-      lcd.print(clearline);
+      lcd.print(blankline);
       printActiveLineMarker();
       lcd.setCursor(1, 0);
-      lcd.print(menutext4);
+      lcd.print(menutext_VOLUME);
       lcd.setCursor(1, 1);
       printValue(volume, 3, 1);
       break;
     case 5:
       lcd.setCursor(0, 0);
-      lcd.print(clearline);
+      lcd.print(blankline);
       lcd.setCursor(0, 1);
-      lcd.print(clearline);
+      lcd.print(blankline);
       printActiveLineMarker();
       lcd.setCursor(1, 0);
-      lcd.print(menutext5);
+      lcd.print(menutext_PRGCHNGE);
       lcd.setCursor(1, 1);
       printValue(prgchange, 3, 1);
       break;
     case 6:
       lcd.setCursor(0, 0);
-      lcd.print(clearline);
+      lcd.print(blankline);
       lcd.setCursor(0, 1);
-      lcd.print(clearline);
+      lcd.print(blankline);
       printActiveLineMarker();
       lcd.setCursor(1, 0);
-      lcd.print(menutext6);
+      lcd.print(menutext_CHANNEL);
       lcd.setCursor(1, 1);
       printValue(channel, 2, 1);
       break;
     case 7:
       lcd.setCursor(0, 0);
-      lcd.print(clearline);
+      lcd.print(blankline);
       lcd.setCursor(0, 1);
-      lcd.print(clearline);
+      lcd.print(blankline);
       printActiveLineMarker();
       lcd.setCursor(1, 0);
-      lcd.print(menutext7);
+      lcd.print(menutext_SAVE);
       lcd.setCursor(1, 1);
       lcd.print(displayText_PRESET);
       printPresetName(8, 1, rP);  // Save Preset springt auf den Speicherplatz vom aktivem Recall Preset
@@ -981,7 +997,7 @@ void recBankA() {
 void sendMIDI() {  
   int note;            // absolute value of played note (0= C0, note 127 = G10)
   //for each key of the keyboad 
-  for (unsigned int iKeyOfBoard = 0; iKeyOfBoard < 13; iKeyOfBoard++) {  
+  for (unsigned int iKeyOfBoard = 0; iKeyOfBoard < noOfKeys; iKeyOfBoard++) {  
     if (keyispressed[iKeyOfBoard] == PRESSED) 
     {          //the key on the board is pressed
       if (bankflag > 0) {
@@ -1097,13 +1113,19 @@ void readEeprom() {
   }
   modulation = 0;
 }
-//----------------------------------------------------------
+
+
+/// @brief resets all notes and sends "NOTE_OFF" command for every possible note on MIDI
 void Panic() {
-  for (unsigned int j = 0; j < 16; j++) {  //Init variables
-    keyispressed[j] = 1;                   //clear the keys array (High is off)
-    noteisplaying[j] = 0;                  //no notes are playing
+  
+  for (unsigned int j = 0; j < noOfKeys; j++) 
+  {  
+    keyispressed[j] = RELEASED;            // clear the keys array (High is off)
+    noteisplaying[j] = 0;                  // no notes are playing
   }
-  for (unsigned int j = 0; j < 128; j++) {
+  
+  for (unsigned int j = 0; j < 128; j++) 
+  {
     MIDI.sendNoteOff(j, 0, channel);
   }
 }
