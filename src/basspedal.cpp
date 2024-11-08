@@ -53,42 +53,44 @@ void readkeys();
 void sendMIDI();
 void sethold();
 void setoctave();
-void recBankA();
+void setBankOfProgramToLoad();
 void setEncoder0Button();
 void handleRotaryKnob();
-void printPresetName(int i, int j, int k);
-
+void printPresetName(int , int , int );
+void abortActiveUserButtonInputs();
+void setBankModeOutputs();
 
 char mapping0[] = { 'L', 'R' };  // This is a rotary encoder so it returns L for down/left and R for up/right on the dial.
 phi_rotary_encoders my_encoder0(mapping0, encoder0PinA, encoder0PinB, Encoder0Detent);
 
 Bounce pressandhold = Bounce(in_ButtonEncoder, 5);
 boolean pah = false;
-boolean pahlock = false;
-Bounce holdbutton = Bounce(switch2, 30);
+Bounce BtnHold = Bounce(switch2, 30);
 Bounce octavebutton = Bounce(switchOct, 30);
 Bounce bankabutton = Bounce(switch4, 30);
 
 
 volatile int encoder0PosM = 0;                              //encoder Menu counter
 volatile int encoder0Pos[8] = { 0, 0, 0, 0, 0, -1, 1, 0 };  //encoder counter
-volatile int encoder1PosVol = 0;                            //encoder volume-wheel counter
-volatile int encoder2PosMod = 0;                            //encoder modulation-wheel counter
 
-volatile boolean holdflag = false;                             //hold function
-volatile boolean octflag = false;                              //octave switcher
+volatile boolean bHoldModeIsActive = false;                             //hold function
+volatile boolean bOctaveSelectModeIsActive = false;                              //octave switcher
 
 /// @brief user interface: toggled by pushing the rotary encoder 
 /// to enter or leave submenu. Value true indicates submenu is active
 volatile boolean bUserIsEditing = false;
 
-volatile int bankflag = 0;                                     //recall preset bank a-c
-volatile boolean bouncer[4] = { false, false, false, false };  //toggle functions  0:hold 1:octaveswitch 2: Pushbutton encoder 3: recall preset bank a
+volatile int iActiveBankSelection = 0;                                     //recall preset bank a-c
+volatile boolean bPreviousState_BtnHold = RELEASED;
+volatile boolean bPreviousState_BtnOctave = false;
+volatile boolean bPreviousState_BtnEncoder = false;
+volatile boolean bPreviousState_BtnBank = false;
 
-int keyispressed[16];  //Is the key currently pressed
-unsigned long keytime = 0;
+
+int keyispressed[16];  //Is the key currently pressed?
+unsigned long keytime = 0; // timestamp of last note ON/OFF event
 int noteisplaying[noOfKeys];  //Is the Note currently playing?
-boolean anynoteisplaying = false;
+boolean anynoteisplaying = false; // only used show note symbol in display
 
 int octave    = 2;      //set currently played octave
 int transpose = 0;   //transpose notes on the board
@@ -174,19 +176,19 @@ volatile int menulevel = 0;  //set menu to home
 char boottext0[] = "   Bass Pedal       ";
 char boottext1[] = "   version tag      ";
 char blankline[] = "                    ";
-char menutext_RECALL[] = "Recall";
-char menutext_OCTAVE[] = "Octave";
-char menutext_TRANSPOSE[] = "Transpose";
-char menutext_VELOCITY[] = "Velocity";
-char menutext_VOLUME[] = "Volume";
-char menutext_PRGCHNGE[] = "Program Change";
-char menutext_CHANNEL[] = "MIDI Channel";
-char menutext_SAVE[] = "Save";
+char menutext_RECALL[]      = "Recall";
+char menutext_OCTAVE[]      = "Octave";
+char menutext_TRANSPOSE[]   = "Transpose";
+char menutext_VELOCITY[]    = "Velocity";
+char menutext_VOLUME[]      = "Volume";
+char menutext_PRGCHNGE[]    = "Program Change";
+char menutext_CHANNEL[]     = "MIDI Channel";
+char menutext_SAVE[]        = "Save";
 
-char displayText_PRESET[] = "PRESET ";
+char displayText_PRESET[]   = "PRESET ";
 char displayText_RECALLED[] = "recalled   ";
-char displayText_NOTE[] = "Note ";
-char displayText_SAVED[] = "saved      ";
+char displayText_NOTE[]     = "Note ";
+char displayText_SAVED[]    = "saved      ";
 
 /// @brief 
 void setup()
@@ -257,7 +259,7 @@ void loop()
   MIDI.read();
   sethold();
   setoctave();
-  recBankA();
+  setBankOfProgramToLoad();
   setEncoder0Button();
   handleRotaryKnob();
 
@@ -633,11 +635,11 @@ void showMenu() {
       if (bUserIsEditing == true) printPresetName(8, 1, rP);
       else printPresetName(8, 1, iCurrProgram);
       // presetbank
-      if (bankflag > 0) {
+      if (iActiveBankSelection > 0) {
         lcd.setCursor(18, 0);
-        if (bankflag == 1) lcd.print("A");
-        if (bankflag == 2) lcd.print("B");
-        if (bankflag == 3) lcd.print("C");
+        if (iActiveBankSelection == 1) lcd.print("A");
+        if (iActiveBankSelection == 2) lcd.print("B");
+        if (iActiveBankSelection == 3) lcd.print("C");
       }
       else {
         lcd.setCursor(18, 0);
@@ -811,65 +813,73 @@ void readkeys()
     keyispressed[i + 8] = ((data[1] >> i) & 1);  //chip 2
   }
 }
-// toggle holdflag on button_press_event
+
+// toggle bHoldModeIsActive on button_press_event
 // use number "notehold" as offset to actual played note
-//----------------------------------------
+
+/// @brief reads user input button "HOLD" and toggles
+/// state of LED output and "bHoldModeIsActive" accrodingly
+/// @details Hold Function used to keep note playing until another note
+/// is played
 void sethold() 
 {
-  holdbutton.update();
-  if (holdbutton.read() == PRESSED) 
+  BtnHold.update();
+  if (BtnHold.read() == PRESSED) 
   {
-    if (holdflag == false && bouncer[0] == true) 
+    // run only once on button press event
+    if (bPreviousState_BtnHold == RELEASED)
     {
-      holdflag = true;
-      bouncer[0] = false;
-      notehold = 129;
-      digitalWrite(ledHold, HIGH);
-      showMenu();
-    }
-    if (holdflag == true && bouncer[0] == true) 
-    {
-      holdflag = false;
-      bouncer[0] = false;
-      MIDI.sendNoteOff(notehold - 1, 0, channel);
-      anynoteisplaying = false;
-      digitalWrite(ledHold, LOW);
-      showMenu();
+      if (bHoldModeIsActive == false) // turn ON HoldMode
+      {
+        bHoldModeIsActive = true;
+        notehold = 129;
+        digitalWrite(ledHold, HIGH);
+        showMenu();
+      }
+      else // turn OFF HoldMode
+      {
+        bHoldModeIsActive = false;
+        MIDI.sendNoteOff(notehold - 1, 0, channel);
+        anynoteisplaying = false;
+        digitalWrite(ledHold, LOW);
+        showMenu();
+      }
+      bPreviousState_BtnHold = PRESSED;
     }
   } 
   else 
   {
-    bouncer[0] = true;
+    bPreviousState_BtnHold = RELEASED;
   }
 }
 
-// wenn octavebutton press_event
-// toggle oct_flag
-// bouncer[1] = true, sobald button losgelassen
-// wird verwendet, um Flanke "pressed" zu erkennen
-
-//----------------------------------------
+/// @brief reads user input button "OCT" and toggles
+/// state of LED output and "bOctaveSelectModeIsActive" accrodingly
+/// @details when bOctaveSelectModeIsActive is true, the next keypad
+/// is choosing the octave from -1 to 10
 void setoctave() {
   octavebutton.update();
   if (octavebutton.read() == PRESSED) 
   {
-    if (octflag == false && bouncer[1] == true) 
-    {
-      bankflag = false;
-      octflag = true;
-      bouncer[1] = false;
-      digitalWrite(ledOct, HIGH);
-    }
-    if (octflag == true && bouncer[1] == true) 
-    {
-      octflag = false;
-      bouncer[1] = false;
-      digitalWrite(ledOct, LOW);
+    // enter only on key press event
+    if(bPreviousState_BtnOctave == RELEASED){
+      if (bOctaveSelectModeIsActive == false) // turn ON Octave
+      {
+        abortActiveUserButtonInputs();
+        bOctaveSelectModeIsActive = true; 
+        digitalWrite(ledOct, HIGH);
+      }
+      else // turn OFF Octave
+      {
+        bOctaveSelectModeIsActive = false;
+        digitalWrite(ledOct, LOW);
+      }
+      bPreviousState_BtnOctave = PRESSED;
     }
   } 
   else  // octavebutton Released
   {
-    bouncer[1] = true;
+    bPreviousState_BtnOctave = RELEASED;
   }
 }
 
@@ -919,124 +929,118 @@ void setEncoder0Button() {
     }
   } else {
     if (digitalRead(in_ButtonEncoder) == PRESSED) {
-      if (bUserIsEditing == false && bouncer[2] == true) {
+      if (bUserIsEditing == false && bPreviousState_BtnEncoder == true) {
         bUserIsEditing = true;
-        bouncer[2] = false;
+        bPreviousState_BtnEncoder = false;
         rP = iCurrProgram;
         printActiveLineMarker();
         digitalWrite(ledPresetGn, LOW);
         digitalWrite(ledPresetRt, LOW);
-        bankflag = 0;
+        iActiveBankSelection = 0;
         digitalWrite(ledHold, LOW);
-        holdflag = 0;
+        bHoldModeIsActive = 0;
         digitalWrite(ledOct, LOW);
-        octflag = 0;
+        bOctaveSelectModeIsActive = 0;
         lcd.setCursor(18, 0);
         lcd.print(" ");
       }
-      if (bUserIsEditing == true && bouncer[2] == true) {
+      if (bUserIsEditing == true && bPreviousState_BtnEncoder == true) {
         bUserIsEditing = false;
-        bouncer[2] = false;
+        bPreviousState_BtnEncoder = false;
         showMenu();
       }
     } else {
-      bouncer[2] = true;
+      bPreviousState_BtnEncoder = true;
     }
   }
 }
 
-// switches with every button_press_event
-// from Bank A to B to C 
-// with is stored in bankflag 1,2,3 and off is 0
-
-//----------------------------------------
-void recBankA() {
+/// @brief switches with every press of Bank Button 
+/// from Bank A to B to C 
+/// with is stored in iActiveBankSelection 1,2,3 and off is 0
+/// next keypad input (1-13) loads the program A1..C13
+void setBankOfProgramToLoad() {
   bankabutton.update();
-  if (bankabutton.read() == PRESSED) {
-    if (bankflag == 0 && bouncer[3] == true) {
-      octflag = false;
-      bankflag = 1;
-      bouncer[3] = false;
-      digitalWrite(ledPresetGn, HIGH);
-      lcd.setCursor(18, 0);
-      lcd.print("A");
-    }
-    if (bankflag == 1 && bouncer[3] == true) {
-      octflag = false;
-      bankflag = 2;
-      bouncer[3] = false;
-      digitalWrite(ledPresetGn, LOW);
-      digitalWrite(ledPresetRt, HIGH);
-      lcd.setCursor(18, 0);
-      lcd.print("B");
-    }
-    if (bankflag == 2 && bouncer[3] == true) {
-      octflag = false;
-      bankflag = 3;
-      bouncer[3] = false;
-      digitalWrite(ledPresetGn, HIGH);
-      lcd.setCursor(18, 0);
-      lcd.print("C");
-    }
-    if (bankflag > 2 && bouncer[3] == true) {
-      bankflag = 0;
-      bouncer[3] = false;
-      digitalWrite(ledPresetGn, LOW);
-      digitalWrite(ledPresetRt, LOW);
-      lcd.setCursor(18, 0);
-      lcd.print(" ");
+  if (bankabutton.read() == PRESSED) 
+  {
+    if (bPreviousState_BtnBank == RELEASED)
+    {
+      // code enters on key press event
+      bOctaveSelectModeIsActive = false; digitalWrite(ledOct, LOW); // abort an running OCT selection
+      
+      // toggle through bank OFF, A,B,C
+      iActiveBankSelection++;
+      if (iActiveBankSelection > 3)
+        iActiveBankSelection = 0;
+      
+      setBankModeOutputs(); // Output current value to user
+      bPreviousState_BtnBank = PRESSED;
     }
   } else {
-    bouncer[3] = true;
+    bPreviousState_BtnBank = RELEASED;
   }
 }
 //-------------------------------------
 // Send MIDI instructions via MIDI out
 // makes no sense to use 
-///-----------------------------
+
+/// @brief durcheinander aus verschiedenen funktionen. iActiveBankSelection und oct raus 
+/// @note this function is not event-driven, therefore the noteisplaying[] array is 
+/// used to detect, if a note changed shall be sent.
+/// 
 void sendMIDI() {  
   int note;            // absolute value of played note (0= C0, note 127 = G10)
   //for each key of the keyboad 
   for (unsigned int iKeyOfBoard = 0; iKeyOfBoard < noOfKeys; iKeyOfBoard++) {  
     if (keyispressed[iKeyOfBoard] == PRESSED) 
-    {          //the key on the board is pressed
-      if (bankflag > 0) {
-        if (bankflag == 1) iCurrProgram = iKeyOfBoard;    // BUG: No sense to mix program with note played
-        if (bankflag == 2) iCurrProgram = iKeyOfBoard + 13;
-        if (bankflag == 3) iCurrProgram = iKeyOfBoard + 26;
-        rP = iCurrProgram;
+    {  
+      // feature?: wenn Bankflag gesetzt, kann mithilfe des Keys ein Programm geladen werden
+      // iActiveBankSelection sagt A-C, der Key das Programm
+      if (iActiveBankSelection > 0) {
+        if (iActiveBankSelection == 1) iCurrProgram = iKeyOfBoard;
+        if (iActiveBankSelection == 2) iCurrProgram = iKeyOfBoard + 13;
+        if (iActiveBankSelection == 3) iCurrProgram = iKeyOfBoard + 26;
+        rP = iCurrProgram;  // wird das Programm beim ersten Ton gesendet, falls ggw Prog. ungleich 
         readEeprom();
         showMenu();
         lcd.setCursor(18, 0);
         lcd.print("  ");
         digitalWrite(ledPresetGn, LOW);
         digitalWrite(ledPresetRt, LOW);
-        holdflag = false;
+        bHoldModeIsActive = false;
         digitalWrite(ledHold, LOW);
-        bankflag = 0;
+        iActiveBankSelection = 0;
         Panic();
         delay(1000);
-        break;
+        break; // get out, no note is output
       }
-      if (octflag == true && iKeyOfBoard < 11) {
+      
+      // feature? Der OctFlag wird gesetzt und der User sucht sich die Octave mit dem key aus
+      // limit octave to 10
+      if (bOctaveSelectModeIsActive == true && iKeyOfBoard <= 10) 
+      {
         octave = iKeyOfBoard;
         showMenu();
         digitalWrite(ledOct, LOW);
-        octflag = false;
+        bOctaveSelectModeIsActive = false;
         delay(1000);
-        break;
-      } else {
+        break; // get out, no note is output
+      } 
+      else // standard path: output note to MIDI
+      {
         if (!noteisplaying[iKeyOfBoard]) {  //if the note is not already playing send MIDI instruction to start the note
-          note = iKeyOfBoard + (octave * 12) + transpose + 1; // why +1?
-          if (note < 129 && note > 0) {
-            if (holdflag == true && notehold < 129) {  //if hold funcion active note off will send before starting the new note
+          note = iKeyOfBoard + (octave * 12) + transpose + 1; // why +1? 
+          // distinguish hold function
+          if (note < 129 && note > 0)  //1..128
+          {
+            if (bHoldModeIsActive == true) {  //if hold funcion active: Send "note off" before starting the new note
               MIDI.sendNoteOff(notehold - 1, 0, channel);
               keytime = millis();
               //Serial.print("NoteOff ");
               //Serial.println(notehold-1);
             }
             MIDI.sendNoteOn(note - 1, velocity, channel);  // Send a Note
-            noteisplaying[iKeyOfBoard] = note;                       // set the note playing flag to TRUE and store the note value
+            noteisplaying[iKeyOfBoard] = note;             // set the note playing flag to TRUE and store the note value
             notehold = note;                               //buffer the old holded note
             keytime = millis();
             anynoteisplaying = true;
@@ -1049,11 +1053,15 @@ void sendMIDI() {
         }
       }
     } 
-    else 
-    {                                               // key is released
+    else  // key is NOT pressed 
+    { 
       if (noteisplaying[iKeyOfBoard] && millis() > keytime + 100) {  //if the note is currently playing, turn it off
         note = noteisplaying[iKeyOfBoard];                           //retrieve the saved note value incase the octave has changed
-        if (holdflag == false) {                           //send note off when hold function is inactive
+        
+        // Stop the note if hold is NOT active. 
+        // if hold flag is active the note remains on 
+        // until a new note is started or hold is deactivated
+        if (bHoldModeIsActive == false) {                           
           MIDI.sendNoteOff(note - 1, 0, channel);          // Stop the note
           keytime = millis();
           anynoteisplaying = false;
@@ -1127,5 +1135,51 @@ void Panic() {
   for (unsigned int j = 0; j < 128; j++) 
   {
     MIDI.sendNoteOff(j, 0, channel);
+  }
+}
+
+
+
+/// @brief Abort all user inputs controlled by buttons, HOLD, OCT, BANK
+/// and reset LEDs and flags, avoid curcurrent inputs
+void abortActiveUserButtonInputs()
+{
+  // Bank
+  digitalWrite(ledPresetGn, LOW);
+  digitalWrite(ledPresetRt, LOW);
+  iActiveBankSelection = 0;
+  // Octave
+  bOctaveSelectModeIsActive = false; digitalWrite(ledOct, LOW);
+  // Hold may remain active?
+  // if stopped, active notes would have to be stopped
+  // digitalWrite(ledHold, LOW);
+  // bHoldModeIsActive = false;
+}
+
+/// @brief show user the state of iActiveBankSelection on LED and display
+void setBankModeOutputs()
+{
+  lcd.setCursor(18, 0); // Prepare output of Bank Name
+  switch (iActiveBankSelection)
+  {
+    case 1:
+      digitalWrite(ledPresetGn, HIGH);
+      digitalWrite(ledPresetRt, LOW);
+      lcd.print("A");
+      break;
+    case 2:
+      digitalWrite(ledPresetGn, LOW);
+      digitalWrite(ledPresetRt, HIGH);
+      lcd.print("B");
+      break;
+   case 3:
+      digitalWrite(ledPresetGn, HIGH);
+      digitalWrite(ledPresetRt, HIGH);
+      lcd.print("C");
+      break; 
+    default:
+      digitalWrite(ledPresetGn, LOW);
+      digitalWrite(ledPresetRt, LOW);
+      lcd.print(" ");
   }
 }
