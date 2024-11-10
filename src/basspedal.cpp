@@ -49,7 +49,7 @@ void readEeprom();
 void saveEeprom();
 void Panic();
 void showMenu();
-void readkeys();
+void readKeyboard();
 void sendMIDI();
 void sethold();
 void setoctave();
@@ -63,11 +63,11 @@ void setBankModeOutputs();
 char mapping0[] = { 'L', 'R' };  // This is a rotary encoder so it returns L for down/left and R for up/right on the dial.
 phi_rotary_encoders my_encoder0(mapping0, encoder0PinA, encoder0PinB, Encoder0Detent);
 
-Bounce pressandhold = Bounce(in_ButtonEncoder, 5);
-boolean pah = false;
-Bounce BtnHold = Bounce(switch2, 30);
-Bounce octavebutton = Bounce(switchOct, 30);
-Bounce bankabutton = Bounce(switch4, 30);
+Bounce encoder0Button = Bounce(in_ButtonEncoder, 5);
+boolean pah = false; // press and hold
+Bounce holdButton = Bounce(switch2, 30);
+Bounce octaveButton = Bounce(switchOct, 30);
+Bounce bankButton = Bounce(switch4, 30);
 
 
 volatile int encoder0PosM = 0;                              //encoder Menu counter
@@ -254,7 +254,7 @@ void setup()
 /// @brief Arduino Working LOOP
 void loop() 
 {
-  readkeys();
+  readKeyboard();
   sendMIDI();
   MIDI.read();
   sethold();
@@ -789,14 +789,14 @@ void printPresetName(int iPosX, int iPosY, int iPreset) {
     if (iPreset - 26 <= 9) lcd.print(" ");
   }
 }
-//-------------------------------------
-// Read the pressed keys into
-// keyispressed[]
-// from state of the I2C chips. 1 is open, 0 is closed.
-void readkeys() 
+
+
+/// @brief reads the keyboard input to variable keyispressed[]
+/// from hardware signals using I2C. Signal 1 is RELEASED KEY, 0 is PRESSED key.
+void readKeyboard() 
 {  //Read the state of the I2C chips. 1 is open, 0 is closed.
 
-  unsigned char data[2];  //data from chip 1/2/3
+  unsigned char data[2];  //data from chip 1/2
 
   Wire.requestFrom(0x38, 1);  // read the data from chip 1 in data[0]
   if (Wire.available()) 
@@ -810,7 +810,7 @@ void readkeys()
   for (unsigned char i = 0; i < 8; i++) 
   {        
     keyispressed[i] = ((data[0] >> i) & 1);      // set the key variable to the current state. chip 1
-    keyispressed[i + 8] = ((data[1] >> i) & 1);  //chip 2
+    keyispressed[i + 8] = ((data[1] >> i) & 1);  // chip 2
   }
 }
 
@@ -823,8 +823,8 @@ void readkeys()
 /// is played
 void sethold() 
 {
-  BtnHold.update();
-  if (BtnHold.read() == PRESSED) 
+  holdButton.update();
+  if (holdButton.read() == PRESSED) 
   {
     // run only once on button press event
     if (bPreviousState_BtnHold == RELEASED)
@@ -858,8 +858,8 @@ void sethold()
 /// @details when bOctaveSelectModeIsActive is true, the next keypad
 /// is choosing the octave from -1 to 10
 void setoctave() {
-  octavebutton.update();
-  if (octavebutton.read() == PRESSED) 
+  octaveButton.update();
+  if (octaveButton.read() == PRESSED) 
   {
     // enter only on key press event
     if(bPreviousState_BtnOctave == RELEASED){
@@ -877,28 +877,36 @@ void setoctave() {
       bPreviousState_BtnOctave = PRESSED;
     }
   } 
-  else  // octavebutton Released
+  else  // octaveButton Released
   {
     bPreviousState_BtnOctave = RELEASED;
   }
 }
 
 
-//----------------------------------------
+/// @brief 
 void setEncoder0Button() {
-  pressandhold.update();
-  if (pressandhold.read() != pah && pressandhold.duration() > 200) {
-    pah = pressandhold.read();
-    if (!pah) {
-      if (menulevel == 0 || menulevel == 7) {
+  encoder0Button.update();
+  
+  
+  if (encoder0Button.read() != pah && encoder0Button.duration() > 2000) 
+  {
+    pah = encoder0Button.read();
+    if (pah == PRESSED) 
+    {
+      if (menulevel == 0 || menulevel == 7) 
+      {
         lcd.setCursor(0, 1);
-        lcd.print("          ");
-        pah = !pah;
+        lcd.print("in work");
+        delay(500);
+        pah = RELEASED;
       }
     }
   }
-  if (pressandhold.read() != pah && pressandhold.duration() > 300) {
-    pah = pressandhold.read();
+
+  if (encoder0Button.read() != pah && encoder0Button.duration() > 3000) 
+  {
+    pah = encoder0Button.read();
     if (!pah) {
       if (menulevel == 0) {
         lcd.setCursor(0, 0);
@@ -929,7 +937,7 @@ void setEncoder0Button() {
     }
   } else {
     if (digitalRead(in_ButtonEncoder) == PRESSED) {
-      if (bUserIsEditing == false && bPreviousState_BtnEncoder == true) {
+      if (bUserIsEditing == false && bPreviousState_BtnEncoder == RELEASED) {
         bUserIsEditing = true;
         bPreviousState_BtnEncoder = false;
         rP = iCurrProgram;
@@ -944,13 +952,13 @@ void setEncoder0Button() {
         lcd.setCursor(18, 0);
         lcd.print(" ");
       }
-      if (bUserIsEditing == true && bPreviousState_BtnEncoder == true) {
+      if (bUserIsEditing == true && bPreviousState_BtnEncoder == RELEASED) {
         bUserIsEditing = false;
         bPreviousState_BtnEncoder = false;
         showMenu();
       }
     } else {
-      bPreviousState_BtnEncoder = true;
+      bPreviousState_BtnEncoder = RELEASED;
     }
   }
 }
@@ -960,8 +968,8 @@ void setEncoder0Button() {
 /// with is stored in iActiveBankSelection 1,2,3 and off is 0
 /// next keypad input (1-13) loads the program A1..C13
 void setBankOfProgramToLoad() {
-  bankabutton.update();
-  if (bankabutton.read() == PRESSED) 
+  bankButton.update();
+  if (bankButton.read() == PRESSED) 
   {
     if (bPreviousState_BtnBank == RELEASED)
     {
