@@ -54,24 +54,24 @@ void sendMIDI();
 void sethold();
 void setoctave();
 void setBankOfProgramToLoad();
-void setEncoder0Button();
+void handleEnc0ButtonPressEvent();
 void handleRotaryKnob();
 void printPresetName(int , int , int );
 void abortActiveUserButtonInputs();
 void setBankModeOutputs();
+void userInputPropertyValue(int * target, int min, int max, bool *valueChanged);
 
 char mapping0[] = { 'L', 'R' };  // This is a rotary encoder so it returns L for down/left and R for up/right on the dial.
 phi_rotary_encoders my_encoder0(mapping0, encoder0PinA, encoder0PinB, Encoder0Detent);
 
 Bounce encoder0Button = Bounce(in_ButtonEncoder, 5);
-boolean pah = false; // press and hold
 Bounce holdButton = Bounce(switch2, 30);
 Bounce octaveButton = Bounce(switchOct, 30);
 Bounce bankButton = Bounce(switch4, 30);
 
 
-volatile int encoder0PosM = 0;                              //encoder Menu counter
-volatile int encoder0Pos[8] = { 0, 0, 0, 0, 0, -1, 1, 0 };  //encoder counter
+volatile int iEnc0Value = 0;  // rotory encoder value
+//volatile int enc0ValueInMenu[8] = { 0, 0, 0, 0, 0, -1, 1, 0 };  //encoder value of each menu level
 
 volatile boolean bHoldModeIsActive = false;                             //hold function
 volatile boolean bOctaveSelectModeIsActive = false;                              //octave switcher
@@ -80,11 +80,11 @@ volatile boolean bOctaveSelectModeIsActive = false;                             
 /// to enter or leave submenu. Value true indicates submenu is active
 volatile boolean bUserIsEditing = false;
 
-volatile int iActiveBankSelection = 0;                                     //recall preset bank a-c
+volatile int iActiveBankSelection = 0;  
 volatile boolean bPreviousState_BtnHold = RELEASED;
-volatile boolean bPreviousState_BtnOctave = false;
-volatile boolean bPreviousState_BtnEncoder = false;
-volatile boolean bPreviousState_BtnBank = false;
+volatile boolean bPreviousState_BtnOctave = RELEASED;
+volatile boolean bPreviousState_BtnEncoder = RELEASED;
+volatile boolean bPreviousState_BtnBank = RELEASED;
 
 
 int keyispressed[16];  //Is the key currently pressed?
@@ -101,7 +101,7 @@ int channel = 1;     //set midi channel
 int prgchange = -1;  //
 int notehold = 129;  //flag for hold function
 int iCurrProgram = 0;     //recall preset number
-int rP = 0;
+int iUserInputProgramNumber = 0;
 int saveP = 0;       //save preset number
 unsigned long menutimeout = 0;  // skip to menulevel 0 after the specified time, when the encoder was turned
 
@@ -172,7 +172,23 @@ byte barpic5[8] = {
   B11111
 };
 //--- Menu
-volatile int menulevel = 0;  //set menu to home
+
+/// @brief 
+enum e_menulevel
+{
+  eMenuRecall = 0,
+  eMenuOctave,
+  eMenuTranspose,
+  eMenuVelocity,
+  eMenuVolume,
+  eMenuProgramChange,
+  eMenuChannel,
+  eMenuSave
+};
+volatile e_menulevel menulevel = eMenuRecall;  
+const int ieMenuFirstItem = static_cast<int>(eMenuRecall);
+const int ieMenuLastItem = static_cast<int>(eMenuSave);
+
 char boottext0[] = "   Bass Pedal       ";
 char boottext1[] = "   version tag      ";
 char blankline[] = "                    ";
@@ -260,14 +276,13 @@ void loop()
   sethold();
   setoctave();
   setBankOfProgramToLoad();
-  setEncoder0Button();
+  handleEnc0ButtonPressEvent();
   handleRotaryKnob();
 
   // skip back to mainmenu after 30s
   if (millis() == menutimeout + 30000)  // 30 Seconds
   { 
-    menulevel = 0;
-    encoder0PosM = 0;
+    menulevel = eMenuRecall;
     bUserIsEditing = false;
     showMenu();
     menutimeout = millis();
@@ -361,228 +376,139 @@ void barGraph(int column, int row, int length, int mvalue, int value)
 
 /// @brief process user turning of the rotary encoder throughout
 /// the menus and update LCD accordingly
-void handleRotaryKnob() {
-  char temp;
-  temp = my_encoder0.getKey();
-  //temp = dial0 -> getKey(); // Use the phi_interfaces to access the same keypad
+void handleRotaryKnob() 
+{
+  bool userInputDetected = false;
+  
+  // scroll through menu level
   if (bUserIsEditing == false) {
-    if (temp == 'R') {
-      menutimeout = millis();
-      if (encoder0PosM < 7) {
-        encoder0PosM++;
-        menulevel = encoder0PosM;
-        showMenu();
-      }
-    }
-    if (temp == 'L') {
-      menutimeout = millis();
-      if (encoder0PosM > 0) {
-        encoder0PosM--;
-        menulevel = encoder0PosM;
-        showMenu();
-      }
+    int newMenuLevel = static_cast<int>(menulevel); // cast to int;
+
+    userInputPropertyValue(&newMenuLevel, ieMenuFirstItem, ieMenuLastItem, &userInputDetected);
+    // need to update menu on-the-fly therefore 
+    
+    if (userInputDetected) // if any movement
+    {
+      menulevel = static_cast<e_menulevel>(newMenuLevel);
+      showMenu();
     }
   }
-  else {
-    if (menulevel == 0) {
-      encoder0Pos[0] = rP;
-      if (temp == 'R') {
-        menutimeout = millis();
-        if (encoder0Pos[0] < 38) {
-          encoder0Pos[0]++;
-          rP = encoder0Pos[0];
+  else // editing is active
+  {
+    // update value appording to menu 
+    if (menulevel == eMenuRecall) {
+      userInputPropertyValue(&iUserInputProgramNumber, 0, 38, &userInputDetected);
+     
+      if (userInputDetected) // update display
+      {
           lcd.setCursor(1, 1);
-          lcd.print(displayText_PRESET);  // "Preset "
-          printPresetName(8, 1, rP);
-        }
-      }
-      if (temp == 'L') {
-        menutimeout = millis();
-        if (encoder0Pos[0] > 0) {
-          encoder0Pos[0]--;
-          rP = encoder0Pos[0];
-          lcd.setCursor(1, 1);
-          lcd.print(displayText_PRESET);  // "Preset "
-          printPresetName(8, 1, rP);
-        }
+          lcd.print(displayText_PRESET); 
+          printPresetName(8, 1, iUserInputProgramNumber);
       }
     }
-    if (menulevel == 1) {
-      encoder0Pos[1] = octave;
-      if (temp == 'R') {
-        menutimeout = millis();
-        if (encoder0Pos[1] < 10) {
-          encoder0Pos[1]++;
-          octave = encoder0Pos[1];
+    if (menulevel == eMenuOctave) {
+      userInputPropertyValue(&octave, 0, 10, &userInputDetected);
+      
+      if (userInputDetected) // update display
+      {
           lcd.setCursor(1, 1);
           lcd.print("C");
           lcd.print(octave - 1);
-          if (octave > 0) lcd.print(" ");
-        }
-      }
-      if (temp == 'L') {
-        menutimeout = millis();
-        if (encoder0Pos[1] > 0) {
-          encoder0Pos[1]--;
-          octave = encoder0Pos[1];
-          lcd.setCursor(1, 1);
-          lcd.print("C");
-          lcd.print(octave - 1);
-          if (octave > 0) lcd.print(" ");
-        }
       }
     }
-    if (menulevel == 2) {
-      encoder0Pos[2] = transpose;
-      if (temp == 'R') {
-        menutimeout = millis();
-        if (encoder0Pos[2] < 12) {
-          encoder0Pos[2]++;
-          transpose = encoder0Pos[2];
+    if (menulevel == eMenuTranspose) {
+      userInputPropertyValue(&transpose, -12, +12, &userInputDetected);
+      
+      if (userInputDetected) // update display
+      {
           lcd.setCursor(1, 1);
           lcd.print(displayText_NOTE);  // "Note "
           if (transpose > 0) lcd.print("+");
           lcd.print(transpose);
           if (transpose <= 9 && transpose >= -9) lcd.print(" ");
-        }
-      }
-      if (temp == 'L') {
-        menutimeout = millis();
-        if (encoder0Pos[2] > -12) {
-          encoder0Pos[2]--;
-          transpose = encoder0Pos[2];
-          lcd.setCursor(1, 1);
-          lcd.print(displayText_NOTE);  // "Note "
-          if (transpose > 0) lcd.print("+");
-          lcd.print(transpose);
-          if (transpose <= 9 && transpose >= -9) lcd.print(" ");
-        }
       }
     }
-    if (menulevel == 3) {
-      encoder0Pos[3] = velocity;
-      if (temp == 'R') {
-        menutimeout = millis();
-        if (encoder0Pos[3] < 127) {
-          encoder0Pos[3]++;
-          velocity = encoder0Pos[3];
+    if (menulevel == eMenuVelocity) {
+      userInputPropertyValue(&velocity, 0, 127, &userInputDetected);
+      if (userInputDetected) // update display
+      {
           lcd.setCursor(1, 1);
           printValue(velocity, 3, 1);
-        }
-      }
-      if (temp == 'L') {
-        menutimeout = millis();
-        if (encoder0Pos[3] > 0) {
-          encoder0Pos[3]--;
-          velocity = encoder0Pos[3];
-          lcd.setCursor(1, 1);
-          printValue(velocity, 3, 1);
-        }
       }
     }
-    if (menulevel == 4) {
-      encoder0Pos[4] = volume;
-      if (temp == 'R') {
-        menutimeout = millis();
-        if (encoder0Pos[4] < 127) {
-          encoder0Pos[4]++;
-          volume = encoder0Pos[4];
-          MIDI.sendControlChange(7, volume, channel);
+    if (menulevel == eMenuVolume) {
+      userInputPropertyValue(&volume, 0, 127, &userInputDetected);
+      if (userInputDetected) // update display
+      {
           lcd.setCursor(1, 1);
           printValue(volume, 3, 1);
+          MIDI.sendControlChange(7, volume, channel);
+          // print bargraph
           lcd.setCursor(0, 3);
           lcd.print("V");
           barGraph(1, 3, 16, 127, volume);
           lcd.setCursor(17, 3);
           printValue(volume, 3, 0);
-        }
-      }
-      if (temp == 'L') {
-        menutimeout = millis();
-        if (encoder0Pos[4] > 0) {
-          encoder0Pos[4]--;
-          volume = encoder0Pos[4];
-          MIDI.sendControlChange(7, volume, channel);
-          lcd.setCursor(1, 1);
-          printValue(volume, 3, 1);
-          lcd.setCursor(0, 3);
-          lcd.print("V");
-          barGraph(1, 3, 16, 127, volume);
-          lcd.setCursor(17, 3);
-          printValue(volume, 3, 0);
-        }
       }
     }
-    if (menulevel == 5) {
-      encoder0Pos[5] = prgchange;
-      if (temp == 'R') {
-        menutimeout = millis();
-        if (encoder0Pos[5] < 127) {
-          encoder0Pos[5]++;
-          prgchange = encoder0Pos[5];
+    if (menulevel == eMenuProgramChange) {
+      userInputPropertyValue(&prgchange, -1, 127, &userInputDetected);
+      if (userInputDetected) // update display
+      {
           lcd.setCursor(1, 1);
           printValue(prgchange, 3, 1);
-          if (prgchange > -1) MIDI.sendProgramChange(prgchange, channel);
-        }
-      }
-      if (temp == 'L') {
-        menutimeout = millis();
-        if (encoder0Pos[5] > -1) {
-          encoder0Pos[5]--;
-          prgchange = encoder0Pos[5];
-          lcd.setCursor(1, 1);
-          printValue(prgchange, 3, 1);
-          if (prgchange > -1) MIDI.sendProgramChange(prgchange, channel);
-        }
+          if (prgchange > -1) MIDI.sendProgramChange(prgchange, channel); // send on-the-fly program changes?
       }
     }
-    if (menulevel == 6) {
-      encoder0Pos[6] = channel;
-      if (temp == 'R') {
-        menutimeout = millis();
-        if (encoder0Pos[6] < 16) {
-          encoder0Pos[6]++;
-          channel = encoder0Pos[6];
+    if (menulevel == eMenuChannel) {
+      userInputPropertyValue(&channel, 1, 16, &userInputDetected);
+      if (userInputDetected) // update display
+      {
           lcd.setCursor(1, 1);
           printValue(channel, 2, 1);
-        }
-      }
-      if (temp == 'L') {
-        menutimeout = millis();
-        if (encoder0Pos[6] > 1) {
-          encoder0Pos[6]--;
-          channel = encoder0Pos[6];
-          lcd.setCursor(1, 1);
-          printValue(channel, 2, 1);
-        }
       }
     }
-    if (menulevel == 7) {
-      encoder0Pos[7] = saveP;
-      if (temp == 'R') {
-        menutimeout = millis();
-        if (encoder0Pos[7] < 38) {
-          encoder0Pos[7]++;
-          saveP = encoder0Pos[7];
+    if (menulevel == eMenuSave) {
+      userInputPropertyValue(&saveP, 0, 38, &userInputDetected);
+      if (userInputDetected) // update display
+      {
           lcd.setCursor(1, 1);
-          lcd.print(displayText_PRESET);  // "Preset "
+          lcd.print(displayText_PRESET); 
           printPresetName(8, 1, saveP);
-        }
-      }
-      if (temp == 'L') {
-        menutimeout = millis();
-        if (encoder0Pos[7] > 0) {
-          encoder0Pos[7]--;
-          saveP = encoder0Pos[7];
-          lcd.setCursor(1, 1);
-          lcd.print(displayText_PRESET);  // "Preset "
-          printPresetName(8, 1, saveP);
-        }
       }
     }
   }
 }
 
+
+/// @brief queries the user input device rotory encoder for input
+/// if user turns knob, target content is counted up (if turning right)
+/// or down (if turning left) to the limits given (including)
+/// @param target adress of target value to update
+/// @param min minimum allowed value of target*
+/// @param max maximum allowed value of target*
+/// @param valueChanged value changed
+void userInputPropertyValue(int * target, int min, int max, bool *valueChanged)
+{
+  char rotationDir;
+  *valueChanged = false;
+  rotationDir = my_encoder0.getKey();
+
+  if (rotationDir == 'R') {
+    if (*target < max) {
+      *target++;
+    }
+  }
+  if (rotationDir == 'L') {
+    if (*target > min) {
+      *target--;
+    }
+  }
+  if (rotationDir) {
+    *valueChanged = true;
+    menutimeout = millis();
+  }
+}
 /// @brief user interface: set symbol ">" at the active line
 /// used to mark the line where editing is done
 void printActiveLineMarker() {
@@ -632,7 +558,7 @@ void showMenu() {
       // text 2. line
       lcd.setCursor(1, 1);
       lcd.print(displayText_PRESET);
-      if (bUserIsEditing == true) printPresetName(8, 1, rP);
+      if (bUserIsEditing == true) printPresetName(8, 1, iUserInputProgramNumber);
       else printPresetName(8, 1, iCurrProgram);
       // presetbank
       if (iActiveBankSelection > 0) {
@@ -759,8 +685,8 @@ void showMenu() {
       lcd.print(menutext_SAVE);
       lcd.setCursor(1, 1);
       lcd.print(displayText_PRESET);
-      printPresetName(8, 1, rP);  // Save Preset springt auf den Speicherplatz vom aktivem Recall Preset
-      saveP = rP;           // Recall Preset an Save Preset übergeben
+      printPresetName(8, 1, iUserInputProgramNumber);  // Save Preset springt auf den Speicherplatz vom aktivem Recall Preset
+      saveP = iUserInputProgramNumber;           // Recall Preset an Save Preset übergeben
       break;
   }
 }
@@ -885,81 +811,95 @@ void setoctave() {
 
 
 /// @brief 
-void setEncoder0Button() {
-  encoder0Button.update();
-  
-  
-  if (encoder0Button.read() != pah && encoder0Button.duration() > 2000) 
+void handleEnc0ButtonPressEvent() {
+
+/// which step of the blocks were entered
+/// used to block re-entering 
+/// 1 = block 1 (print "loading"), 2 = block2 (actual loading / saving)
+static uint8_t bBtnHoldState = 0; 
+
+  encoder0Button.update(); 
+    
+  /// this code is called in a loop every xx ms. 
+  /// so it shall detect a button press event for a longer duration
+  /// block 1  
+  if (encoder0Button.read() == PRESSED && encoder0Button.duration() > 2000 && bBtnHoldState < 1) 
   {
-    pah = encoder0Button.read();
-    if (pah == PRESSED) 
+    if (menulevel == eMenuRecall || menulevel == eMenuSave) 
     {
-      if (menulevel == 0 || menulevel == 7) 
-      {
-        lcd.setCursor(0, 1);
-        lcd.print("in work");
-        delay(500);
-        pah = RELEASED;
-      }
+      lcd.setCursor(0, 1);
+      lcd.print("hold for load...");
+      bBtnHoldState = 1; // remember to restore display
     }
   }
 
-  if (encoder0Button.read() != pah && encoder0Button.duration() > 3000) 
+  /// block 2: User holds button pressed
+  if (encoder0Button.read() == PRESSED && encoder0Button.duration() > 3000 && bBtnHoldState == 1) 
   {
-    pah = encoder0Button.read();
-    if (!pah) {
-      if (menulevel == 0) {
-        lcd.setCursor(0, 0);
-        lcd.print(displayText_PRESET);  // "Preset "
-        iCurrProgram = rP;
-        readEeprom();
-        printPresetName(7, 0, iCurrProgram);
-        Panic();
-        lcd.setCursor(0, 1);
-        lcd.print(displayText_RECALLED);
-        bUserIsEditing = false;
-        delay(2000);
-        showMenu();
-      }
-      if (menulevel == 7) {
-        lcd.setCursor(0, 0);
-        lcd.print(displayText_PRESET);  // "Preset "
-        saveEeprom();
-        printPresetName(7, 0, saveP);
-        lcd.setCursor(0, 1);
-        lcd.print(displayText_SAVED);
-        bUserIsEditing = false;
-        delay(2000);
-        menulevel = 0;  // jump back to play menu
-        encoder0PosM = menulevel;
-        showMenu();
-      }
+    if (menulevel == eMenuRecall || menulevel == eMenuSave) 
+    {
+      bBtnHoldState = 2;
+      lcd.setCursor(0, 0); lcd.print(displayText_PRESET); 
     }
-  } else {
-    if (digitalRead(in_ButtonEncoder) == PRESSED) {
-      if (bUserIsEditing == false && bPreviousState_BtnEncoder == RELEASED) {
+    
+    if (menulevel == eMenuRecall) 
+    {
+      iCurrProgram = iUserInputProgramNumber; // take user input as current Program
+      printPresetName(7, 0, iCurrProgram);
+      readEeprom();
+      Panic();
+      lcd.setCursor(0, 1);
+      lcd.print(displayText_RECALLED);
+    }
+    if (menulevel == eMenuSave) 
+    {
+      saveEeprom();
+      printPresetName(7, 0, saveP);  // use saveP as 
+      lcd.setCursor(0, 1);
+      lcd.print(displayText_SAVED);
+      
+    }
+    if (menulevel == eMenuRecall || menulevel == eMenuSave) 
+    {
+      bUserIsEditing = false;
+      delay(2000);
+      menulevel = eMenuRecall;  // reset menu to recall
+      // iEnc0Value = menulevel; /// @todo: Makes sense?
+      showMenu();
+    }
+  } 
+  else // short button pressing 
+  {
+    // toggle edit mode
+    if (digitalRead(in_ButtonEncoder) == PRESSED && bPreviousState_BtnEncoder == RELEASED)
+    {
+      bPreviousState_BtnEncoder = PRESSED;
+      if (bUserIsEditing) 
+      {
+        bUserIsEditing = false;
+        showMenu();
+      }
+      else // not in edit mode
+      {
         bUserIsEditing = true;
-        bPreviousState_BtnEncoder = false;
-        rP = iCurrProgram;
         printActiveLineMarker();
-        digitalWrite(ledPresetGn, LOW);
-        digitalWrite(ledPresetRt, LOW);
-        iActiveBankSelection = 0;
+        abortActiveUserButtonInputs();
+        // disable hold mode
+        // but would need to stop playing notes also
         digitalWrite(ledHold, LOW);
         bHoldModeIsActive = 0;
-        digitalWrite(ledOct, LOW);
-        bOctaveSelectModeIsActive = 0;
-        lcd.setCursor(18, 0);
-        lcd.print(" ");
+        if (anynoteisplaying)
+          Panic();
       }
-      if (bUserIsEditing == true && bPreviousState_BtnEncoder == RELEASED) {
-        bUserIsEditing = false;
-        bPreviousState_BtnEncoder = false;
-        showMenu();
-      }
-    } else {
-      bPreviousState_BtnEncoder = RELEASED;
-    }
+      
+    } 
+  }
+  
+  // button released 
+  if (encoder0Button.read() == RELEASED && bBtnHoldState > 0)
+  {
+    bBtnHoldState = 0;
+    showMenu();
   }
 }
 
@@ -1008,7 +948,7 @@ void sendMIDI() {
         if (iActiveBankSelection == 1) iCurrProgram = iKeyOfBoard;
         if (iActiveBankSelection == 2) iCurrProgram = iKeyOfBoard + 13;
         if (iActiveBankSelection == 3) iCurrProgram = iKeyOfBoard + 26;
-        rP = iCurrProgram;  // wird das Programm beim ersten Ton gesendet, falls ggw Prog. ungleich 
+        iUserInputProgramNumber = iCurrProgram;  // wird das Programm beim ersten Ton gesendet, falls ggw Prog. ungleich 
         readEeprom();
         showMenu();
         lcd.setCursor(18, 0);
