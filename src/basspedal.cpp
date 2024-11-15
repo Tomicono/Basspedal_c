@@ -59,12 +59,12 @@ void handleRotaryKnob();
 void printPresetName(int , int , int );
 void abortActiveUserButtonInputs();
 void setBankModeOutputs();
-void userInputPropertyValue(int * target, int min, int max, bool *valueChanged);
+void userInputPropertyValue(int *target, int min, int max, bool *valueChanged);
 
 char mapping0[] = { 'L', 'R' };  // This is a rotary encoder so it returns L for down/left and R for up/right on the dial.
 phi_rotary_encoders my_encoder0(mapping0, encoder0PinA, encoder0PinB, Encoder0Detent);
 
-Bounce encoder0Button = Bounce(in_ButtonEncoder, 5);
+Bounce encoder0Button = Bounce(in_ButtonEncoder, 20);
 Bounce holdButton = Bounce(switch2, 30);
 Bounce octaveButton = Bounce(switchOct, 30);
 Bounce bankButton = Bounce(switch4, 30);
@@ -85,7 +85,6 @@ volatile boolean bPreviousState_BtnHold = RELEASED;
 volatile boolean bPreviousState_BtnOctave = RELEASED;
 volatile boolean bPreviousState_BtnEncoder = RELEASED;
 volatile boolean bPreviousState_BtnBank = RELEASED;
-
 
 int keyispressed[16];  //Is the key currently pressed?
 unsigned long keytime = 0; // timestamp of last note ON/OFF event
@@ -252,8 +251,9 @@ void setup()
   
   lcd.createChar(8, notepic); ///< char(8) is note symbol (used when key is pressed)
 
-  //Serial.begin(9600);  //debugmonitor
-  //Serial.println("Ready");
+  Serial.begin(9600);  //debugmonitor
+  
+  
   
   lcd.clear();
   lcd.setCursor(0, 1);
@@ -263,6 +263,7 @@ void setup()
   delay(5000);
   lcd.clear();
   showMenu();
+  Serial.println("Ready");
 }
 
 
@@ -385,8 +386,8 @@ void handleRotaryKnob()
     int newMenuLevel = static_cast<int>(menulevel); // cast to int;
 
     userInputPropertyValue(&newMenuLevel, ieMenuFirstItem, ieMenuLastItem, &userInputDetected);
-    // need to update menu on-the-fly therefore 
     
+    // need to update menu on-the-fly therefore 
     if (userInputDetected) // if any movement
     {
       menulevel = static_cast<e_menulevel>(newMenuLevel);
@@ -484,28 +485,35 @@ void handleRotaryKnob()
 /// @brief queries the user input device rotory encoder for input
 /// if user turns knob, target content is counted up (if turning right)
 /// or down (if turning left) to the limits given (including)
+/// @details die Klammern (*target) sind wichtig! Sonst wird nicht der Inhalt von target 
+/// verwendet, sondern ++ wird auf die Adresse angewendet und dann der inhalt 
+/// genommen! 
 /// @param target adress of target value to update
 /// @param min minimum allowed value of target*
 /// @param max maximum allowed value of target*
 /// @param valueChanged value changed
-void userInputPropertyValue(int * target, int min, int max, bool *valueChanged)
+void userInputPropertyValue(int *target, int min, int max, bool *valueChanged)
 {
   char rotationDir;
   *valueChanged = false;
   rotationDir = my_encoder0.getKey();
 
+  // Important: die Klammern (*target) sind wichtig! Sonst wird nicht der Inhalt von target 
+  // verwendet, sondern ++ wird auf die Adresse angewendet und dann der inhalt 
+  // genommen! 
   if (rotationDir == 'R') {
     if (*target < max) {
-      *target++;
+      (*target)++;      
+      *valueChanged = true; // valueChanged only, if value is really changed!
     }
   }
   if (rotationDir == 'L') {
     if (*target > min) {
-      *target--;
+      (*target)--;
+      *valueChanged = true;
     }
   }
   if (rotationDir) {
-    *valueChanged = true;
     menutimeout = millis();
   }
 }
@@ -877,6 +885,7 @@ static uint8_t bBtnHoldState = 0;
       if (bUserIsEditing) 
       {
         bUserIsEditing = false;
+        digitalWrite(ledPresetGn, 0);/// TODO: DEBUG OUTPUT
         showMenu();
       }
       else // not in edit mode
@@ -890,16 +899,25 @@ static uint8_t bBtnHoldState = 0;
         bHoldModeIsActive = 0;
         if (anynoteisplaying)
           Panic();
+        /// TODO: DEBUG OUTPUT
+        digitalWrite(ledPresetGn, 1);
+
       }
       
     } 
   }
   
   // button released 
-  if (encoder0Button.read() == RELEASED && bBtnHoldState > 0)
+  if (encoder0Button.read() == RELEASED)
   {
-    bBtnHoldState = 0;
-    showMenu();
+    bPreviousState_BtnEncoder = RELEASED;
+    if (bBtnHoldState > 0)
+    {
+      bBtnHoldState = 0;
+      showMenu();
+      Serial.println("enc buttin hold aborted");
+
+    }
   }
 }
 
@@ -984,7 +1002,7 @@ void sendMIDI() {
             if (bHoldModeIsActive == true) {  //if hold funcion active: Send "note off" before starting the new note
               MIDI.sendNoteOff(notehold - 1, 0, channel);
               keytime = millis();
-              //Serial.print("NoteOff ");
+              Serial.print("NoteOff ");
               //Serial.println(notehold-1);
             }
             MIDI.sendNoteOn(note - 1, velocity, channel);  // Send a Note
@@ -994,7 +1012,7 @@ void sendMIDI() {
             anynoteisplaying = true;
             lcd.setCursor(19, 0);
             lcd.print((char)8);
-            //Serial.print("NoteOn ");
+            Serial.print("NoteOn ");
             //Serial.print(channel);
             //Serial.println(note-1);
           }
@@ -1073,7 +1091,7 @@ void readEeprom() {
 
 /// @brief resets all notes and sends "NOTE_OFF" command for every possible note on MIDI
 void Panic() {
-  
+  Serial.println(__func__);
   for (unsigned int j = 0; j < noOfKeys; j++) 
   {  
     keyispressed[j] = RELEASED;            // clear the keys array (High is off)
@@ -1092,6 +1110,7 @@ void Panic() {
 /// and reset LEDs and flags, avoid curcurrent inputs
 void abortActiveUserButtonInputs()
 {
+  Serial.println(__func__);
   // Bank
   digitalWrite(ledPresetGn, LOW);
   digitalWrite(ledPresetRt, LOW);
