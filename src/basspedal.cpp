@@ -64,7 +64,7 @@ void userInputPropertyValue(int *target, int min, int max, bool *valueChanged);
 char mapping0[] = { 'L', 'R' };  // This is a rotary encoder so it returns L for down/left and R for up/right on the dial.
 phi_rotary_encoders my_encoder0(mapping0, encoder0PinA, encoder0PinB, Encoder0Detent);
 
-Bounce encoder0Button = Bounce(in_ButtonEncoder, 20);
+Bounce encoder0Button = Bounce(in_ButtonEncoder, 30);
 Bounce holdButton = Bounce(switch2, 30);
 Bounce octaveButton = Bounce(switchOct, 30);
 Bounce bankButton = Bounce(switch4, 30);
@@ -191,6 +191,7 @@ const int ieMenuLastItem = static_cast<int>(eMenuSave);
 char boottext0[] = "   Bass Pedal       ";
 char boottext1[] = "   version tag      ";
 char blankline[] = "                    ";
+char countline[] = "12345678901234567890";
 char menutext_RECALL[]      = "Recall";
 char menutext_OCTAVE[]      = "Octave";
 char menutext_TRANSPOSE[]   = "Transpose";
@@ -280,50 +281,61 @@ void loop()
   handleEnc0ButtonPressEvent();
   handleRotaryKnob();
 
-  // skip back to mainmenu after 30s
-  if (millis() == menutimeout + 30000)  // 30 Seconds
-  { 
-    menulevel = eMenuRecall;
-    bUserIsEditing = false;
-    showMenu();
-    menutimeout = millis();
-  }
+  // // skip back to mainmenu after 30s
+  // if (millis() == menutimeout + 30000)  // 30 Seconds
+  // { 
+  //   menulevel = eMenuRecall;
+  //   bUserIsEditing = false;;digitalWrite(ledPresetGn, false);
+  //   showMenu();
+  //   menutimeout = millis();
+  // }
 }
 
 //-----------------------------------------------
-/// @brief Print values up to 999 
-/// @param value value to print
-/// @param digits number of digits to print range 1-3
-/// @param align 0=right, 1=left
-void printValue(int value, int digits, int align) { 
-  switch(digits) {
-    case 1:
-      break;
-    case 2:
-      if(value < 10) {
-        if(!align) lcd.print(" ");
-        lcd.print(value);
-        if(align) lcd.print(" ");
-      }
-      else lcd.print(value);
-      break;
-    case 3:
-      if(value == -1) {
-        lcd.print("Off");
-      }
-      else if( value >= 0 && value < 10) {
-        if(!align) lcd.print("  ");
-        lcd.print(value);
-        if(align) lcd.print("  ");
-      }
-      else if(value > 9 && value < 100) {
-        if(!align) lcd.print(" ");
-        lcd.print(value);
-        if(align) lcd.print(" ");
-      }
-      else lcd.print(value);
-      break;
+/// @brief print string of "width" characters, left-side filled with spaces if needed
+/// if width is too small for the value, the value will increase the width as needed
+/// @param value value to print (-128..+127)
+/// @param width width of output without sign, if value is small, space if filled with white space 
+/// @param sign  print sign before number, makes width 1 greater
+void printValueAligned(int value, uint8_t width, bool sign) { 
+// actual width is width + 1 char sign, if set
+
+  uint8_t neededSpace = 0; 
+  uint8_t neededDigits = 1;
+  int neededFillerChars =0; 
+  char signChar = '+';
+
+  // limit width to 3 to avoid 
+  // too large output
+  if (width > 3)  width = 3;
+  width += (sign ? 1 : 0); 
+  
+  // for negative numbers sign is always shown, regardless of input parameter
+  if (value < 0) {
+    signChar = '-';
+    sign = true;
+    value = -(value); // remove negative sign for printing purpose
   }
+
+  // depending on digits print spaces then value
+  if (value < 10)
+    neededDigits = 1;
+  else if (value < 100)
+    neededDigits = 2;
+  else 
+    neededDigits = 3;
+
+  // calcualte count of white space needed
+  neededSpace = neededDigits + (sign ? 1 : 0); 
+  neededFillerChars = width - neededSpace;
+  while (neededFillerChars > 0){
+    lcd.print(" ");
+    neededFillerChars--;
+  }
+  if (sign)
+    lcd.print(signChar);
+  
+  lcd.print(value);
 }
 
 
@@ -413,8 +425,8 @@ void handleRotaryKnob()
       if (userInputDetected) // update display
       {
           lcd.setCursor(1, 1);
-          lcd.print("C");
-          lcd.print(octave - 1);
+          lcd.print("O");
+          printValueAligned(octave - 1, 2, true);
       }
     }
     if (menulevel == eMenuTranspose) {
@@ -424,9 +436,7 @@ void handleRotaryKnob()
       {
           lcd.setCursor(1, 1);
           lcd.print(displayText_NOTE);  // "Note "
-          if (transpose > 0) lcd.print("+");
-          lcd.print(transpose);
-          if (transpose <= 9 && transpose >= -9) lcd.print(" ");
+          printValueAligned(transpose, 2, true);
       }
     }
     if (menulevel == eMenuVelocity) {
@@ -434,7 +444,7 @@ void handleRotaryKnob()
       if (userInputDetected) // update display
       {
           lcd.setCursor(1, 1);
-          printValue(velocity, 3, 1);
+          printValueAligned(velocity, 3, false);
       }
     }
     if (menulevel == eMenuVolume) {
@@ -442,23 +452,27 @@ void handleRotaryKnob()
       if (userInputDetected) // update display
       {
           lcd.setCursor(1, 1);
-          printValue(volume, 3, 1);
+          printValueAligned(volume, 3, false);
           MIDI.sendControlChange(7, volume, channel);
           // print bargraph
           lcd.setCursor(0, 3);
           lcd.print("V");
           barGraph(1, 3, 16, 127, volume);
           lcd.setCursor(17, 3);
-          printValue(volume, 3, 0);
+          printValueAligned(volume, 3, false);
       }
     }
     if (menulevel == eMenuProgramChange) {
       userInputPropertyValue(&prgchange, -1, 127, &userInputDetected);
       if (userInputDetected) // update display
       {
-          lcd.setCursor(1, 1);
-          printValue(prgchange, 3, 1);
           if (prgchange > -1) MIDI.sendProgramChange(prgchange, channel); // send on-the-fly program changes?
+          lcd.setCursor(1, 1);
+          if (prgchange > -1) 
+            printValueAligned(prgchange, 3, false);
+          else
+           lcd.print("Off");
+          
       }
     }
     if (menulevel == eMenuChannel) {
@@ -466,7 +480,7 @@ void handleRotaryKnob()
       if (userInputDetected) // update display
       {
           lcd.setCursor(1, 1);
-          printValue(channel, 2, 1);
+          printValueAligned(channel, 2, false);
       }
     }
     if (menulevel == eMenuSave) {
@@ -554,15 +568,8 @@ void showMenu() {
       // text transpose
       lcd.setCursor(16, 1);
       lcd.print("T");
-      if (transpose > 0) {
-        lcd.setCursor(17, 1);
-        lcd.print("+");
-        lcd.print(transpose);
-      }
-      else {
-        lcd.setCursor(17, 1);
-        lcd.print(transpose);
-      }
+      lcd.setCursor(17, 1);
+      printValueAligned(transpose, 2, true);
       // text 2. line
       lcd.setCursor(1, 1);
       lcd.print(displayText_PRESET);
@@ -592,19 +599,19 @@ void showMenu() {
       lcd.setCursor(12, 0);
       lcd.print("P");
       lcd.setCursor(13, 0);
-      printValue(prgchange, 3, 1);
+      printValueAligned(prgchange, 3, false);
       // bargraph modulation
       lcd.setCursor(0, 2);
       lcd.print("M");
       barGraph(1, 2, 16, 127, modulation);
       lcd.setCursor(17, 2);
-      printValue(modulation, 3, 0);
+      printValueAligned(modulation, 3, false);
       // bargraph volume
       lcd.setCursor(0, 3);
       lcd.print("V");
       barGraph(1, 3, 16, 127, volume);
       lcd.setCursor(17, 3);
-      printValue(volume, 3, 0);
+      printValueAligned(volume, 3, false);
       break;
     case 1:
       lcd.setCursor(0, 0);
@@ -616,7 +623,7 @@ void showMenu() {
       lcd.print(menutext_OCTAVE);
       lcd.setCursor(1, 1);
       lcd.print("C");
-      lcd.print(octave - 1);
+      printValueAligned(octave - 1, 2, false);
       break;
     case 2:
       lcd.setCursor(0, 0);
@@ -628,16 +635,7 @@ void showMenu() {
       lcd.print(menutext_TRANSPOSE);
       lcd.setCursor(1, 1);
       lcd.print(displayText_NOTE);
-      if (transpose > 0) {
-        lcd.setCursor(6, 1);
-        lcd.print("+");
-        lcd.setCursor(7, 1);
-        lcd.print(transpose);
-      }
-      else {
-        lcd.setCursor(6, 1);
-        lcd.print(transpose);
-      }
+      printValueAligned(transpose, 2, true);
       break;
     case 3:
       lcd.setCursor(0, 0);
@@ -648,7 +646,7 @@ void showMenu() {
       lcd.setCursor(1, 0);
       lcd.print(menutext_VELOCITY);
       lcd.setCursor(1, 1);
-      printValue(velocity, 3, 1);
+      printValueAligned(velocity, 3, false);
       break;
     case 4:
       lcd.setCursor(0, 0);
@@ -659,7 +657,7 @@ void showMenu() {
       lcd.setCursor(1, 0);
       lcd.print(menutext_VOLUME);
       lcd.setCursor(1, 1);
-      printValue(volume, 3, 1);
+      printValueAligned(volume, 3, false);
       break;
     case 5:
       lcd.setCursor(0, 0);
@@ -670,7 +668,7 @@ void showMenu() {
       lcd.setCursor(1, 0);
       lcd.print(menutext_PRGCHNGE);
       lcd.setCursor(1, 1);
-      printValue(prgchange, 3, 1);
+      printValueAligned(prgchange, 3, false);
       break;
     case 6:
       lcd.setCursor(0, 0);
@@ -681,7 +679,7 @@ void showMenu() {
       lcd.setCursor(1, 0);
       lcd.print(menutext_CHANNEL);
       lcd.setCursor(1, 1);
-      printValue(channel, 2, 1);
+      printValueAligned(channel, 2, false);
       break;
     case 7:
       lcd.setCursor(0, 0);
@@ -704,20 +702,18 @@ void showMenu() {
 /// @param iPosY line 
 /// @param iPreset index of preset, splitted in A0-A12 B0-12, C0-C12
 void printPresetName(int iPosX, int iPosY, int iPreset) {  
+  lcd.setCursor(iPosX, iPosY);
   if (iPreset >= 0 && iPreset < 13) {
-    lcd.setCursor(iPosX, iPosY);
     lcd.print("A");
     lcd.print(iPreset);
     if (iPreset <= 9) lcd.print(" ");
   }
   if (iPreset > 12 && iPreset < 26) {
-    lcd.setCursor(iPosX, iPosY);
     lcd.print("B");
     lcd.print(iPreset - 13);
     if (iPreset - 13 <= 9) lcd.print(" ");
   }
   if (iPreset > 25 && iPreset < 39) {
-    lcd.setCursor(iPosX, iPosY);
     lcd.print("C");
     lcd.print(iPreset - 26);
     if (iPreset - 26 <= 9) lcd.print(" ");
@@ -830,18 +826,22 @@ static uint8_t bBtnHoldState = 0;
     
   /// this code is called in a loop every xx ms. 
   /// so it shall detect a button press event for a longer duration
-  /// block 1  
-  if (encoder0Button.read() == PRESSED && encoder0Button.duration() > 2000 && bBtnHoldState < 1) 
+  /// stage 1  
+  if (encoder0Button.read() == PRESSED && encoder0Button.duration() > 300 && bBtnHoldState < 1) 
   {
     if (menulevel == eMenuRecall || menulevel == eMenuSave) 
     {
       lcd.setCursor(0, 1);
-      lcd.print("hold for load...");
-      bBtnHoldState = 1; // remember to restore display
+      lcd.print("hold for ");
+      if (menulevel == eMenuRecall) 
+        lcd.print("load...");
+      else
+        lcd.print("save...");
+      bBtnHoldState = 1; // stage 1 finished
     }
   }
 
-  /// block 2: User holds button pressed
+  /// stage 2: User holds button pressed
   if (encoder0Button.read() == PRESSED && encoder0Button.duration() > 3000 && bBtnHoldState == 1) 
   {
     if (menulevel == eMenuRecall || menulevel == eMenuSave) 
@@ -869,7 +869,7 @@ static uint8_t bBtnHoldState = 0;
     }
     if (menulevel == eMenuRecall || menulevel == eMenuSave) 
     {
-      bUserIsEditing = false;
+      bUserIsEditing = false;digitalWrite(ledPresetGn, false);
       delay(2000);
       menulevel = eMenuRecall;  // reset menu to recall
       // iEnc0Value = menulevel; /// @todo: Makes sense?
@@ -881,16 +881,16 @@ static uint8_t bBtnHoldState = 0;
     // toggle edit mode
     if (digitalRead(in_ButtonEncoder) == PRESSED && bPreviousState_BtnEncoder == RELEASED)
     {
+      Serial.println(__func__);
       bPreviousState_BtnEncoder = PRESSED;
       if (bUserIsEditing) 
       {
-        bUserIsEditing = false;
-        digitalWrite(ledPresetGn, 0);/// TODO: DEBUG OUTPUT
+        bUserIsEditing = false; digitalWrite(ledPresetGn, false);/// TODO: DEBUG OUTPUT
         showMenu();
       }
       else // not in edit mode
       {
-        bUserIsEditing = true;
+        bUserIsEditing = true; digitalWrite(ledPresetGn, true);
         printActiveLineMarker();
         abortActiveUserButtonInputs();
         // disable hold mode
@@ -899,9 +899,6 @@ static uint8_t bBtnHoldState = 0;
         bHoldModeIsActive = 0;
         if (anynoteisplaying)
           Panic();
-        /// TODO: DEBUG OUTPUT
-        digitalWrite(ledPresetGn, 1);
-
       }
       
     } 
