@@ -192,7 +192,7 @@ char boottext0[] = "   Bass Pedal       ";
 char boottext1[] = "   version tag      ";
 char blankline[] = "                    ";
 char countline[] = "12345678901234567890";
-char menutext_RECALL[]      = "Recall";
+char menutext_RECALL[]      = "Program";
 char menutext_OCTAVE[]      = "Octave";
 char menutext_TRANSPOSE[]   = "Transpose";
 char menutext_VELOCITY[]    = "Velocity";
@@ -205,6 +205,21 @@ char displayText_PRESET[]   = "PRESET ";
 char displayText_RECALLED[] = "recalled   ";
 char displayText_NOTE[]     = "Note ";
 char displayText_SAVED[]    = "saved      ";
+
+struct lcdLocation
+{
+  int row;
+  int line;
+};
+
+struct t_menuitemproperty
+{
+  char menutext[15];
+  char abbreviation[1];
+  lcdLocation dispLocation;
+  int8_t  minValue;
+  int8_t  maxValue;
+};
 
 /// @brief 
 void setup()
@@ -548,15 +563,14 @@ void printActiveLineMarker() {
     lcd.print(">");
   }
 }
+
 //-------------------------------------------
 void showMenu() {
 
   switch (menulevel) {
     case 0:
-      lcd.setCursor(0, 0);
-      lcd.print(blankline);
-      lcd.setCursor(0, 1);
-      lcd.print(blankline);
+      lcd.setCursor(0, 0); lcd.print(blankline);
+      lcd.setCursor(0, 1); lcd.print(blankline);
       printActiveLineMarker();
       lcd.setCursor(1, 0);
       lcd.print(menutext_RECALL);
