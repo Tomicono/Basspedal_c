@@ -1,55 +1,21 @@
 #include <Arduino.h>
-#include <EEPROM.h>
+#include "StorageFunctions.h"
 
-/*
- * EEPROM DUMP
- *
- * Reads the value of each byte of the EEPROM and prints it
- * to the computer.
- */
-
-int address = 0;
-byte value;
-
-const int ERR_NO_ERROR = 0;
-const int ERR_OUT_OF_RANGE = -10;
-const int ERR_CHECKSUM_INVALID = -20;
-
-typedef struct
-{
-  // removed prgName, would need functions to enter name
-  // too much effort
-  // char prgName[4];       // programm name 
-  int8_t octave;            // set currently played octave
-  int8_t transpose;         // transpose notes on the board
-  int8_t velocity;          // set note velocity
-  uint8_t volume;            // set volume
-  int8_t modulation;        // set volume
-  uint8_t channel;           // set midi channel
-  int8_t prgchange;         //
-  uint8_t checksum; // sum without carry over of all bytes in struct including this must equal zero
-} T_Setting;
-
-char epromHeader[4] = {'B', 'P', '0', '1'};
-const int epromHeaderSize = sizeof(epromHeader);
 
 T_Setting t_Eprom_Item;
-const int epromItemSize = sizeof(T_Setting);
-const int eprom_Items = 3 * 13; // 13, because user can select A1..A13 with the keypad
+
 
 void epromPrintContent(void);
-int epromFixFormat(int *);
-int epromFormat();
+
+//int epromFormat();
 int epromnInitItem(unsigned int index);
-int epromGetElement(T_Setting *item, unsigned int index);
-int epromSetElement(T_Setting item, unsigned int index);
 void createDefaultElement(T_Setting *item);
 void PrintItem(T_Setting);
 
 unsigned int checksum_calc(T_Setting);
 void checksum_set(T_Setting*);
 
-void Nosetup()
+void testRun()
 {
   int error = 0;
   int nfixedElements = 0;
@@ -73,7 +39,6 @@ void Nosetup()
   testItem.transpose  = 'T'; 
   testItem.velocity  = 'v'; 
   testItem.volume  = 'V'; 
-  testItem.modulation  ='M'; 
   testItem.channel ='C';
   testItem.prgchange  = 'E'; 
   checksum_set(&testItem);
@@ -98,7 +63,6 @@ void Nosetup()
     testItem.transpose = (i % 10)+ 0x30; 
     testItem.velocity = 'T';
     testItem.volume = '+';
-    testItem.modulation = 'W';
     testItem.channel = '1';
     testItem.prgchange = '8';
     checksum_set(&testItem);
@@ -197,33 +161,11 @@ int epromFixFormat(int * numOfFixedItems)
   return headerNotOk;
 }
 
-/// @brief writes default values to all elements of project storage
-/// @return error code, 0: no error, -1 error
-int epromFormat()
-{
-  int error = 0;
-  uint8_t i;
-  Serial.println("Write HEADER");
-  for (i = 0; i < epromHeaderSize; i++)
-  {
-    eeprom_write_block(epromHeader, 0, sizeof(epromHeader));
-    //Serial.print("&i = "); Serial.print((int) &i); Serial.print(" i = "); Serial.print(i); Serial.print(" epromHeader[i] = "); Serial.println(epromHeader[i], HEX);
-  }
-  Serial.println("Write element");
-  Serial.println(i);
-
-  for (i = 0; i < eprom_Items; i++)
-    error = epromnInitItem(i);
-
-  return error;
-}
-
 /// @brief write default values to one element of preset
 ///  int octave = 2;
 /// int transpose = 0
 /// int velocity = 127
 /// int volume = 127
-/// int modulation = 0
 /// int channel = 1
 /// int prgchange = -1
 /// @param index
@@ -242,9 +184,19 @@ int epromnInitItem(unsigned int index)
   return ERR_NO_ERROR;
 }
 
+/// @brief create a T_Setting item with default values for a new item
+/// @param item fills one T_Setting item with default values
 void createDefaultElement(T_Setting *item)
 {
-  T_Setting defaultElement = {2, 0, 127, 127, 0, 1, -1, 0}; ///< important: init checksum with 0, because is also added during the checksum calculation
+  T_Setting defaultElement = {
+    .octave = 2, 
+    .transpose = 0, 
+    .velocity =  127, 
+    .volume =  127, 
+    .channel = 1, 
+    .prgchange = -1, 
+    .checksum = 0 ///< important: init checksum with 0, because is also added during the checksum calculation
+    }; 
   checksum_set(&defaultElement);
   memcpy(item, &defaultElement, epromItemSize);
 }

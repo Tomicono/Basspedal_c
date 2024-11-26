@@ -16,7 +16,7 @@
 #include <Arduino.h>
 #include <MIDI.h>
 #include <Wire.h>
-#include <EEPROM.h>
+#include "StorageFunctions.h"
 #include <LiquidCrystal_I2C.h>
 #include <phi_interfaces.h>
 #include <Bounce.h>
@@ -43,10 +43,11 @@ LiquidCrystal_I2C lcd(Addr_LCD, 20, 4);
 #define RELEASED 0x1        // button not pressed --> Input open = high
 
 const uint8_t noOfKeys = 13;  // number of keys of bass pedal
+T_Setting t_CurrSetting;
 
 // Functions
-void readEeprom();
-void saveEeprom();
+// void readEprom();
+// void saveEeprom();
 void Panic();
 void showMenu();
 void readKeyboard();
@@ -91,13 +92,6 @@ unsigned long keytime = 0; // timestamp of last note ON/OFF event
 int noteisplaying[noOfKeys];  //Is the Note currently playing?
 boolean anynoteisplaying = false; // only used show note symbol in display
 
-int octave    = 2;      //set currently played octave
-int transpose = 0;   //transpose notes on the board
-int velocity  = 127;  //set note velocity
-int volume    = 127;    //set volume
-int modulation = 0;  //set volume
-int channel = 1;     //set midi channel
-int prgchange = -1;  //
 int notehold = 129;  //flag for hold function
 int iCurrProgram = 0;     //recall preset number
 int iUserInputProgramNumber = 0;
@@ -210,6 +204,8 @@ char displayText_SAVED[]    = "saved      ";
 void setup()
 {
   #pragma message(GIT_REV)
+  int nFixedProgamSettings = 0;
+  
   Wire.begin();                                   // setup the I2C bus
   MIDI.begin(MIDI_CHANNEL_OMNI);                  //initialise midi library
   MIDI.setThruFilterMode(midi::Thru::Full);       // Full (every incoming message is sent back)
@@ -242,8 +238,6 @@ void setup()
   digitalWrite(ledPresetGn, LOW);
   digitalWrite(ledPresetRt, LOW);
 
-  readEeprom();  //load saved values
-  Panic();
   lcd.createChar(1, barpic1);  // char(1) is barpic1
   lcd.createChar(2, barpic2);
   lcd.createChar(3, barpic3);
@@ -254,6 +248,10 @@ void setup()
 
   Serial.begin(9600);  //debugmonitor
   
+  epromFixFormat(&nFixedProgamSettings);
+  epromGetElement(&t_CurrSetting, iCurrProgram);
+  
+  Panic();
   
   
   lcd.clear();
@@ -261,6 +259,8 @@ void setup()
   lcd.print(boottext0);
   lcd.setCursor(0, 2);
   lcd.print(GIT_REV);
+  lcd.setCursor(0, 3);
+  lcd.print("Program"); // TODO: add output if reading eprom has failures (error, nFixedItems)
   delay(5000);
   lcd.clear();
   showMenu();
@@ -392,6 +392,7 @@ void barGraph(int column, int row, int length, int mvalue, int value)
 void handleRotaryKnob() 
 {
   bool userInputDetected = false;
+  int temp = 0; // used as substitute variable before typecast to intended variable
   
   // scroll through menu level
   if (bUserIsEditing == false) {
@@ -420,67 +421,78 @@ void handleRotaryKnob()
       }
     }
     if (menulevel == eMenuOctave) {
-      userInputPropertyValue(&octave, 0, 10, &userInputDetected);
-      
+      temp = t_CurrSetting.octave;
+      userInputPropertyValue(&temp, 0, 10, &userInputDetected);
       if (userInputDetected) // update display
       {
+          t_CurrSetting.octave = temp;
           lcd.setCursor(1, 1);
           lcd.print("O");
-          printValueAligned(octave - 1, 2, true);
+          printValueAligned(t_CurrSetting.octave - 1, 2, true);
       }
     }
     if (menulevel == eMenuTranspose) {
-      userInputPropertyValue(&transpose, -12, +12, &userInputDetected);
+      temp = t_CurrSetting.transpose;
+      userInputPropertyValue(&temp, -12, +12, &userInputDetected);
       
       if (userInputDetected) // update display
       {
+          t_CurrSetting.transpose = temp;
           lcd.setCursor(1, 1);
           lcd.print(displayText_NOTE);  // "Note "
-          printValueAligned(transpose, 2, true);
+          printValueAligned(t_CurrSetting.transpose, 2, true);
       }
     }
     if (menulevel == eMenuVelocity) {
-      userInputPropertyValue(&velocity, 0, 127, &userInputDetected);
+      temp = t_CurrSetting.velocity;
+      userInputPropertyValue(&temp, 0, 127, &userInputDetected);
       if (userInputDetected) // update display
       {
+          t_CurrSetting.velocity = temp;
           lcd.setCursor(1, 1);
-          printValueAligned(velocity, 3, false);
+          printValueAligned(t_CurrSetting.velocity, 3, false);
       }
     }
     if (menulevel == eMenuVolume) {
-      userInputPropertyValue(&volume, 0, 127, &userInputDetected);
+      temp = t_CurrSetting.volume;
+      userInputPropertyValue(&temp, 0, 127, &userInputDetected);
       if (userInputDetected) // update display
       {
+          t_CurrSetting.volume = temp;
           lcd.setCursor(1, 1);
-          printValueAligned(volume, 3, false);
-          MIDI.sendControlChange(7, volume, channel);
+          printValueAligned(t_CurrSetting.volume, 3, false);
+          MIDI.sendControlChange(7, t_CurrSetting.volume, t_CurrSetting.channel);
           // print bargraph
           lcd.setCursor(0, 3);
           lcd.print("V");
-          barGraph(1, 3, 16, 127, volume);
+          barGraph(1, 3, 16, 127, t_CurrSetting.volume);
           lcd.setCursor(17, 3);
-          printValueAligned(volume, 3, false);
+          printValueAligned(t_CurrSetting.volume, 3, false);
       }
     }
     if (menulevel == eMenuProgramChange) {
-      userInputPropertyValue(&prgchange, -1, 127, &userInputDetected);
+      temp = t_CurrSetting.prgchange;
+      userInputPropertyValue(&temp, -1, 127, &userInputDetected);
       if (userInputDetected) // update display
       {
-          if (prgchange > -1) MIDI.sendProgramChange(prgchange, channel); // send on-the-fly program changes?
+          t_CurrSetting.prgchange = temp;
+          if (t_CurrSetting.prgchange > -1) MIDI.sendProgramChange(t_CurrSetting.prgchange, t_CurrSetting.channel); // send on-the-fly program changes?
           lcd.setCursor(1, 1);
-          if (prgchange > -1) 
-            printValueAligned(prgchange, 3, false);
+          if (t_CurrSetting.prgchange > -1) 
+            printValueAligned(t_CurrSetting.prgchange, 3, false);
           else
            lcd.print("Off");
           
       }
     }
     if (menulevel == eMenuChannel) {
-      userInputPropertyValue(&channel, 1, 16, &userInputDetected);
+      temp = t_CurrSetting.channel;
+      userInputPropertyValue(&temp, 1, 16, &userInputDetected);
       if (userInputDetected) // update display
       {
+          t_CurrSetting.channel = temp;
           lcd.setCursor(1, 1);
-          printValueAligned(channel, 2, false);
+          printValueAligned(t_CurrSetting.channel, 2, false);
       }
     }
     if (menulevel == eMenuSave) {
@@ -563,13 +575,13 @@ void showMenu() {
       // text octave
       lcd.setCursor(12, 1);
       lcd.print("C");
-      lcd.print(octave - 1);
-      if (octave > 0) lcd.print(" ");
+      lcd.print(t_CurrSetting.octave - 1);
+      if (t_CurrSetting.octave > 0) lcd.print(" ");
       // text transpose
       lcd.setCursor(16, 1);
       lcd.print("T");
       lcd.setCursor(17, 1);
-      printValueAligned(transpose, 2, true);
+      printValueAligned(t_CurrSetting.transpose, 2, true);
       // text 2. line
       lcd.setCursor(1, 1);
       lcd.print(displayText_PRESET);
@@ -599,19 +611,13 @@ void showMenu() {
       lcd.setCursor(12, 0);
       lcd.print("P");
       lcd.setCursor(13, 0);
-      printValueAligned(prgchange, 3, false);
-      // bargraph modulation
-      lcd.setCursor(0, 2);
-      lcd.print("M");
-      barGraph(1, 2, 16, 127, modulation);
-      lcd.setCursor(17, 2);
-      printValueAligned(modulation, 3, false);
+      printValueAligned(t_CurrSetting.prgchange, 3, false);
       // bargraph volume
       lcd.setCursor(0, 3);
       lcd.print("V");
-      barGraph(1, 3, 16, 127, volume);
+      barGraph(1, 3, 16, 127, t_CurrSetting.volume);
       lcd.setCursor(17, 3);
-      printValueAligned(volume, 3, false);
+      printValueAligned(t_CurrSetting.volume, 3, false);
       break;
     case 1:
       lcd.setCursor(0, 0);
@@ -623,7 +629,7 @@ void showMenu() {
       lcd.print(menutext_OCTAVE);
       lcd.setCursor(1, 1);
       lcd.print("C");
-      printValueAligned(octave - 1, 2, false);
+      printValueAligned(t_CurrSetting.octave - 1, 2, false);
       break;
     case 2:
       lcd.setCursor(0, 0);
@@ -635,7 +641,7 @@ void showMenu() {
       lcd.print(menutext_TRANSPOSE);
       lcd.setCursor(1, 1);
       lcd.print(displayText_NOTE);
-      printValueAligned(transpose, 2, true);
+      printValueAligned(t_CurrSetting.transpose, 2, true);
       break;
     case 3:
       lcd.setCursor(0, 0);
@@ -646,7 +652,7 @@ void showMenu() {
       lcd.setCursor(1, 0);
       lcd.print(menutext_VELOCITY);
       lcd.setCursor(1, 1);
-      printValueAligned(velocity, 3, false);
+      printValueAligned(t_CurrSetting.velocity, 3, false);
       break;
     case 4:
       lcd.setCursor(0, 0);
@@ -657,7 +663,7 @@ void showMenu() {
       lcd.setCursor(1, 0);
       lcd.print(menutext_VOLUME);
       lcd.setCursor(1, 1);
-      printValueAligned(volume, 3, false);
+      printValueAligned(t_CurrSetting.volume, 3, false);
       break;
     case 5:
       lcd.setCursor(0, 0);
@@ -668,7 +674,7 @@ void showMenu() {
       lcd.setCursor(1, 0);
       lcd.print(menutext_PRGCHNGE);
       lcd.setCursor(1, 1);
-      printValueAligned(prgchange, 3, false);
+      printValueAligned(t_CurrSetting.prgchange, 3, false);
       break;
     case 6:
       lcd.setCursor(0, 0);
@@ -679,7 +685,7 @@ void showMenu() {
       lcd.setCursor(1, 0);
       lcd.print(menutext_CHANNEL);
       lcd.setCursor(1, 1);
-      printValueAligned(channel, 2, false);
+      printValueAligned(t_CurrSetting.channel, 2, false);
       break;
     case 7:
       lcd.setCursor(0, 0);
@@ -769,7 +775,7 @@ void sethold()
       else // turn OFF HoldMode
       {
         bHoldModeIsActive = false;
-        MIDI.sendNoteOff(notehold - 1, 0, channel);
+        MIDI.sendNoteOff(notehold - 1, 0, t_CurrSetting.channel);
         anynoteisplaying = false;
         digitalWrite(ledHold, LOW);
         showMenu();
@@ -854,14 +860,14 @@ static uint8_t bBtnHoldState = 0;
     {
       iCurrProgram = iUserInputProgramNumber; // take user input as current Program
       printPresetName(7, 0, iCurrProgram);
-      readEeprom();
+      epromGetElement(&t_CurrSetting, iCurrProgram);
       Panic();
       lcd.setCursor(0, 1);
       lcd.print(displayText_RECALLED);
     }
     if (menulevel == eMenuSave) 
     {
-      saveEeprom();
+      epromSetElement(t_CurrSetting, saveP);
       printPresetName(7, 0, saveP);  // use saveP as 
       lcd.setCursor(0, 1);
       lcd.print(displayText_SAVED);
@@ -964,7 +970,7 @@ void sendMIDI() {
         if (iActiveBankSelection == 2) iCurrProgram = iKeyOfBoard + 13;
         if (iActiveBankSelection == 3) iCurrProgram = iKeyOfBoard + 26;
         iUserInputProgramNumber = iCurrProgram;  // wird das Programm beim ersten Ton gesendet, falls ggw Prog. ungleich 
-        readEeprom();
+        epromGetElement(&t_CurrSetting, iCurrProgram);
         showMenu();
         lcd.setCursor(18, 0);
         lcd.print("  ");
@@ -982,7 +988,7 @@ void sendMIDI() {
       // limit octave to 10
       if (bOctaveSelectModeIsActive == true && iKeyOfBoard <= 10) 
       {
-        octave = iKeyOfBoard;
+        t_CurrSetting.octave = iKeyOfBoard;
         showMenu();
         digitalWrite(ledOct, LOW);
         bOctaveSelectModeIsActive = false;
@@ -992,17 +998,17 @@ void sendMIDI() {
       else // standard path: output note to MIDI
       {
         if (!noteisplaying[iKeyOfBoard]) {  //if the note is not already playing send MIDI instruction to start the note
-          note = iKeyOfBoard + (octave * 12) + transpose + 1; // why +1? 
+          note = iKeyOfBoard + (t_CurrSetting.octave * 12) + t_CurrSetting.transpose + 1; // why +1? 
           // distinguish hold function
           if (note < 129 && note > 0)  //1..128
           {
             if (bHoldModeIsActive == true) {  //if hold funcion active: Send "note off" before starting the new note
-              MIDI.sendNoteOff(notehold - 1, 0, channel);
+              MIDI.sendNoteOff(notehold - 1, 0, t_CurrSetting.channel);
               keytime = millis();
               Serial.print("NoteOff ");
               //Serial.println(notehold-1);
             }
-            MIDI.sendNoteOn(note - 1, velocity, channel);  // Send a Note
+            MIDI.sendNoteOn(note - 1, t_CurrSetting.velocity, t_CurrSetting.channel);  // Send a Note
             noteisplaying[iKeyOfBoard] = note;             // set the note playing flag to TRUE and store the note value
             notehold = note;                               //buffer the old holded note
             keytime = millis();
@@ -1025,7 +1031,7 @@ void sendMIDI() {
         // if hold flag is active the note remains on 
         // until a new note is started or hold is deactivated
         if (bHoldModeIsActive == false) {                           
-          MIDI.sendNoteOff(note - 1, 0, channel);          // Stop the note
+          MIDI.sendNoteOff(note - 1, 0, t_CurrSetting.channel);          // Stop the note
           keytime = millis();
           anynoteisplaying = false;
           lcd.setCursor(19, 0);
@@ -1038,22 +1044,9 @@ void sendMIDI() {
     }
   }
 }
+
 //----------------------------------------------------------
-void saveEeprom() {
-  int prg, trans;
-  if (octave != EEPROM.read(saveP * 6)) EEPROM.write(saveP * 6, octave);
-  if (transpose >= 0 && transpose < 13) trans = transpose;
-  else trans = transpose + 30;  // Shift negative value to a positive above 12
-  if (trans != EEPROM.read(saveP * 6 + 1)) EEPROM.write(saveP * 6 + 1, trans);
-  if (velocity != EEPROM.read(saveP * 6 + 2)) EEPROM.write(saveP * 6 + 2, velocity);
-  if (volume != EEPROM.read(saveP * 6 + 3)) EEPROM.write(saveP * 6 + 3, volume);
-  if (prgchange == -1) prg = 128;  // Prg Change Off
-  else prg = prgchange;
-  if (prg != EEPROM.read(saveP * 6 + 4)) EEPROM.write(saveP * 6 + 4, prg);
-  if (channel != EEPROM.read(saveP * 6 + 5)) EEPROM.write(saveP * 6 + 5, channel);
-}
-//----------------------------------------------------------
-void readEeprom() {
+/*void readEeprom() {
   int prg, trans;
 
   if (EEPROM.read(iCurrProgram * 6) < 10 && EEPROM.read(iCurrProgram * 6) >= 0) {
@@ -1082,9 +1075,8 @@ void readEeprom() {
   if (EEPROM.read(iCurrProgram * 6 + 5) < 17 && EEPROM.read(iCurrProgram * 6 + 5) > 0) {
     channel = EEPROM.read(iCurrProgram * 6 + 5);
   }
-  modulation = 0;
 }
-
+*/
 
 /// @brief resets all notes and sends "NOTE_OFF" command for every possible note on MIDI
 void Panic() {
@@ -1097,7 +1089,7 @@ void Panic() {
   
   for (unsigned int j = 0; j < 128; j++) 
   {
-    MIDI.sendNoteOff(j, 0, channel);
+    MIDI.sendNoteOff(j, 0, t_CurrSetting.channel);
   }
 }
 
